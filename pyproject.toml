@@ -1,0 +1,26 @@
+[project]
+name = "agent-zone-control"
+version = "0.1.0"
+description = "Runtime containment and behavioural detection for AI agents in segmented enterprise networks."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["control", "detection", "agents", "poc", "tests"]
+
+[[tool.mypy.overrides]]
+module = "yaml.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

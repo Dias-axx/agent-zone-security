@@ -1,0 +1,6 @@
+rule_id: AGT-ZONE-001
+name: Cross-zone traversal denied
+mitre_atlas: "MITRE ATLAS (2026 mapping) - AML.T0053 LLM Plugin Compromise, used here for lateral movement via agent tooling"
+owasp_asi: "OWASP Top 10 for Agentic Applications (Dec 2025) - Privilege Abuse"
+severity: high
+logic: "kind == 'zone' and verdict == 'deny'"

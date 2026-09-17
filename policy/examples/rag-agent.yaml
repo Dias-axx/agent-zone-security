@@ -1,0 +1,33 @@
+# Data-access role. Demonstrates the data-exposure boundary (per-collection scope),
+# not just the network boundary. This is where inherited oversharing from a document
+# store becomes visible: the agent's tool scope allows querying the store, but access
+# to a specific sensitive collection is denied independently at the data_scope layer.
+role: rag-agent
+
+identity:
+  type: standalone
+  ttl_seconds: 600
+
+capabilities:
+  tools:
+    - docstore.query
+    - docstore.summarize
+  confirm_required: []
+  data_scope:
+    collections:
+      - name: public-handbook
+        access: read
+      - name: hr-confidential
+        access: none
+
+egress:
+  default: deny
+  allowlist:
+    - .vectorstore.example.internal
+
+zones:
+  home: agent-restricted
+  reachable: []
+
+response:
+  on_violation: alert

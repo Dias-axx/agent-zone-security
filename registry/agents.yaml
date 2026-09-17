@@ -1,0 +1,36 @@
+# Agent inventory. Every entry must resolve to an accountable human owner and,
+# for delegated roles, an accountable delegating user. This file plus the policy
+# it references is the admission gate input (see README architecture diagram).
+agents:
+  - id: agt-log-reader-001
+    owner: security-team@example.internal
+    delegated_by: null
+    role: read-only-agent
+    policy: policy/examples/read-only-agent.yaml
+    zone: agent-restricted
+    autonomy_level: low
+    purpose: "Read and summarize application logs for triage."
+    review_due: "2026-12-31"
+    kill_switch: enabled
+
+  - id: agt-deploy-assistant-001
+    owner: platform-team@example.internal
+    delegated_by: alice@example.internal
+    role: deploy-agent
+    policy: policy/examples/deploy-agent.yaml
+    zone: agent-restricted
+    autonomy_level: medium
+    purpose: "Propose and stage deployment changes on behalf of a human operator."
+    review_due: "2026-12-31"
+    kill_switch: enabled
+
+  - id: agt-rag-assistant-001
+    owner: knowledge-team@example.internal
+    delegated_by: null
+    role: rag-agent
+    policy: policy/examples/rag-agent.yaml
+    zone: agent-restricted
+    autonomy_level: low
+    purpose: "Answer questions using an internal document store."
+    review_due: "2026-12-31"
+    kill_switch: enabled
