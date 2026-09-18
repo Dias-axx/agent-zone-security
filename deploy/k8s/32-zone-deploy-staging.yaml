@@ -1,0 +1,38 @@
+# Mirrors policy/examples/deploy-agent.yaml's zones.reachable: [deploy-staging].
+# Only pods labelled role=deploy-agent in agent-restricted may cross into
+# deploy-staging; every other pod in agent-restricted stays confined to its home
+# zone plus the egress gateway and DNS (see 10/20/31). This is the network-layer
+# mirror of the policy engine's evaluate_zone() — both must agree, and divergence
+# between them is itself a detection signal (see docs/architecture.md).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cross-zone-deploy-staging
+  namespace: agent-restricted
+spec:
+  podSelector:
+    matchLabels:
+      role: deploy-agent
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              zone: deploy-staging
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-from-deploy-agent
+  namespace: deploy-staging
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              zone: agent-restricted
+          podSelector:
+            matchLabels:
+              role: deploy-agent

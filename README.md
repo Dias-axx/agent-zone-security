@@ -66,24 +66,25 @@ enforcement, egress control, per-agent identity and behavioural detection into o
 
 The Tool Broker and Egress Gateway both call into the same policy decision point
 (`control/policy_engine.py`) today; the network-level enforcement (Cilium
-NetworkPolicy, a real forward proxy) shown in the diagram is Phase 2 and not yet
-implemented — see [Phase status](#phase-status).
+NetworkPolicy, an egress-gateway pod) shown in the diagram is defined as code
+under `deploy/` but not yet confirmed running end to end anywhere — see
+[Phase status](#phase-status) and `docs/architecture.md`.
 
 ## Control layers
 
 **Prevention**
-- Default-deny egress per agent namespace (Cilium `NetworkPolicy`, Phase 2)
-- Namespace = zone; cross-zone traffic only via explicit, reviewed policy
-- All outbound traffic forced through an egress gateway; direct connections dropped (Phase 2)
+- Default-deny egress per agent namespace (`deploy/k8s/10-default-deny.yaml`, Cilium-enforced `NetworkPolicy`)
+- Namespace = zone; cross-zone traffic only via explicit, reviewed policy (`deploy/k8s/32-zone-deploy-staging.yaml`)
+- All outbound traffic forced through an egress-gateway pod; direct connections dropped (`deploy/k8s/30-31-*.yaml`)
 - Short-lived, task-scoped capability tokens — never long-lived API keys (`control/token_issuer.py`)
 - AND-gate for delegated identity: a delegated agent's effective permission is the
   intersection of its role scope and the scope of the human it acts for, never a
   superset (`control/policy_engine.py`)
 
 **Detection**
-- Cilium/Hubble flow logs — every `DENIED` verdict is a high-fidelity signal (Phase 2/3)
-- Egress proxy logs — non-allowlisted destinations, abnormal transfer volume (Phase 2/3)
-- OpenTelemetry tool-call traces — calls outside the declared role scope (Phase 3)
+- Cilium/Hubble flow logs — every `DENIED` verdict is a high-fidelity signal (normaliser implemented, live ingestion not yet wired — see Known limitations)
+- Egress proxy logs — non-allowlisted destinations, abnormal transfer volume (normaliser implemented, live ingestion not yet wired)
+- OpenTelemetry tool-call traces — calls outside the declared role scope (normaliser implemented, live ingestion not yet wired)
 - Declarative detection rules evaluated against normalised events (`detection/`)
 
 A blocked attempt is worth more than a successful request: it proves the agent *wanted* something it
@@ -122,7 +123,7 @@ detection/     event normalisation + declarative rule engine, ATLAS/ASI-mapped r
 agents/        deterministic mock agents (log_reader, deploy_assistant) + optional LLM adapter
 poc/           reproducible attack/containment scenarios, each returns a process exit code
 tests/         pytest suite covering every deny path and the AND-gate
-deploy/        k3d/Cilium cluster and Kubernetes manifests (planned, Phase 2)
+deploy/        k3d/Cilium cluster config and Kubernetes manifests (zones, default-deny, egress gateway, Kyverno)
 docs/          threat model, architecture notes, compliance mapping, ADRs
 ```
 
@@ -132,7 +133,7 @@ docs/          threat model, architecture notes, compliance mapping, ADRs
 |---|---|---|
 | 1 | Registry, policy schema + examples, policy engine, mock agents | done |
 | 1.5 | Token issuer, audit log, response chain, pytest suite, CI | done |
-| 2 | k3d + Cilium, zone isolation, egress gateway, admission control | planned |
+| 2 | k3d + Cilium, zone isolation, egress gateway, admission control | manifests written, cluster creation + Cilium install verified; pod scheduling/live Hubble flow **not yet verified anywhere** — see `docs/architecture.md` |
 | 3 | Detection engine: rule evaluation implemented against synthetic events; live Hubble/OTel/Vault ingestion not yet wired | partial |
 | 4 | Compliance mapping (EU AI Act, DORA, ISO 42001, NIST AI RMF, BAIT/MaRisk) | documented, honestly marked partial/documented-only — see `docs/compliance-mapping.md` |
 
@@ -160,6 +161,23 @@ python -m poc.scenario_secret_harvest    # secret-store access + exfiltration co
 python -m poc.scenario_denial_of_wallet  # high-volume tool calls flagged, response chain escalated
 ```
 
+### Cluster (Phase 2, unverified — read this before running)
+
+```bash
+make cluster-up     # k3d cluster + Cilium/Hubble via Helm
+make deploy          # apply deploy/k8s/ (zones, default-deny, egress gateway, test pods)
+make poc-cluster     # poc/scenario_zone_cluster.sh: cross-zone attempt -> DROPPED Hubble flow
+make cluster-down    # tear down
+```
+
+These targets do what was actually run while building this repo, up to a point:
+`cluster-up` succeeds (cluster creates, Cilium's Helm chart installs cleanly), but
+in that build environment no pod — Cilium's own DaemonSet included — ever reached
+`Running`, so `deploy` and `poc-cluster` were never confirmed. See
+`docs/architecture.md` for the exact failure and the diagnosis performed. Run
+these on real infrastructure (a VM, bare metal, or a CI runner with full
+nested-container support) to get the actual proof.
+
 ## Known limitations
 
 - **No TLS inspection.** The egress gateway design (Phase 2, not yet built) sees SNI and destination
@@ -179,6 +197,11 @@ python -m poc.scenario_denial_of_wallet  # high-volume tool calls flagged, respo
 - **No live cluster wiring yet.** The response chain's `isolate`/`terminate` actions are dry-run only;
   the detection engine evaluates rules against synthetic events, not a running Cilium/OTel/Vault
   pipeline. See [Phase status](#phase-status).
+- **Cluster manifests are unverified end to end.** `deploy/k3d/cluster.yaml` and `deploy/k8s/*.yaml`
+  were written and cluster creation + the Cilium Helm install were confirmed, but pod scheduling was
+  blocked by a containerd/runc failure specific to the sandbox this repo was built in (see
+  `docs/architecture.md`). Do not treat Phase 2 as proven until `make poc-cluster` has actually been
+  run successfully and its `hubble observe` output captured.
 - No customer, employer or production data is used anywhere in this repository. All scenarios are
   synthetic.
 

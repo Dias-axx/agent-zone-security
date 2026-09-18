@@ -1,8 +1,11 @@
 # ADR 0001: Cilium over Calico for the Phase 2 cluster CNI
 
-**Status**: Proposed (Phase 2 — k3d/Cilium cluster — is not implemented yet; this
-decision is recorded ahead of that work so the choice and its cost are on record
-before the cluster manifests are written).
+**Status**: Accepted, partially validated. `deploy/k3d/cluster.yaml` and the
+Cilium Helm install in `make cluster-up` implement this decision; cluster
+creation and the Cilium control-plane images installing were verified in this
+repo's build session, but pod scheduling (and therefore Hubble flow
+visibility) was not — see docs/architecture.md's "Cluster" section for the
+specific failure and what still needs confirming on real infrastructure.
 
 ## Context
 
@@ -40,8 +43,10 @@ Use Cilium, with Hubble enabled for flow observability.
 
 ## Consequences
 
-- `deploy/k3d/cluster.yaml` (Phase 2, not yet written) must disable the default
-  k3d CNI (`--disable-network-policy` / flannel) before installing Cilium.
+- `deploy/k3d/cluster.yaml` disables the default k3d CNI (flannel) and the
+  built-in NetworkPolicy controller before installing Cilium — implemented.
 - Detection rule `AGT-ZONE-001` is expected to fire against real Hubble
-  `DROPPED` flows once Phase 2 lands (see `docs/architecture.md`), not only
-  against the policy engine's own synthetic verdicts as it does today.
+  `DROPPED` flows once a cluster's pods actually schedule (see
+  `docs/architecture.md`), not only against the policy engine's own synthetic
+  verdicts as it does today. `poc/scenario_zone_cluster.sh` is written for
+  this but not yet confirmed passing anywhere.

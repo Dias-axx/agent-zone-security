@@ -78,14 +78,59 @@ running cluster's event stream.
 
 ### Cluster (`deploy/`)
 
-Not implemented in this pass. Per the build order, Phase 2 (k3d + Cilium, zone
-NetworkPolicies, egress gateway, admission control) has to land before Phase 3
-(a real Go response controller and live detection) makes sense, and both are
-explicitly out of scope for this iteration to avoid partially-wired
-infrastructure that cannot be exercised end to end. See `docs/adr/` for the
-Cilium-over-Calico decision, recorded ahead of that implementation.
+`deploy/k3d/cluster.yaml` defines a k3d cluster with the default CNI (flannel)
+and k3s's built-in NetworkPolicy controller disabled, so Cilium is installed
+separately (`make cluster-up`, via Helm) as the sole owner of the dataplane and
+policy enforcement. `deploy/k8s/` defines the zones as namespaces
+(`agent-restricted`, `deploy-staging`, `corp-prod`, `egress-gateway`), a
+default-deny `NetworkPolicy` per zone, an explicit DNS allow, an egress-gateway
+placeholder pod that is the only non-DNS destination agent zones may reach, the
+`deploy-staging` cross-zone allow mirroring `policy/examples/deploy-agent.yaml`'s
+`zones.reachable`, and two Kyverno `ClusterPolicy` resources for pod-hardening
+checks the Pod Security Standard alone does not cover (owner/role label
+provenance).
 
-**Status**: planned.
+**Verification status, stated plainly**: in the sandbox this repository was
+built in, `k3d cluster create` succeeds and `helm install cilium` deploys
+without error, but no pod — Cilium's own DaemonSet included — ever reaches
+`Running`. The container runtime fails every CRI pod-sandbox creation with:
+
+```
+failed to create containerd task: failed to create shim task: OCI runtime
+create failed: runc create failed: unable to start container process:
+can't get final child's PID from pipe: EOF: unknown
+```
+
+Diagnosis performed in that session: image pulls initially failed on
+certificate verification (the nested node containers did not trust the
+sandbox's TLS-intercepting proxy CA — fixed by installing the CA bundle into
+each node container and restarting it). After that fix, a bare `runc run`
+invoked directly inside the k3d node container succeeds end to end (including
+a fresh network namespace), but the same node's containerd, going through the
+full CRI pod-sandbox path, fails consistently and immediately on every pod,
+including a plain `pause` container. That gap — bare `runc` works, CRI-driven
+`runc` does not — points at something specific to the OCI spec containerd
+generates (cgroup path assignment or a seccomp/security profile difference)
+colliding with a restriction imposed above Docker in that sandbox, not at a
+mistake in the k3d/Cilium configuration itself. This was not chased further
+within the session's time budget once the failure reproduced identically
+across a clean pod recreation.
+
+**What this means for the manifests in this repo**: `deploy/k3d/cluster.yaml`
+and `deploy/k8s/*.yaml` are believed correct against the acceptance criterion
+(a cross-zone connection attempt should produce a `DROPPED` Hubble flow and
+`AGT-ZONE-001` should fire against it — see `poc/scenario_zone_cluster.sh`),
+but that belief has NOT been confirmed by actually running them successfully.
+Run `make cluster-up && make deploy && make poc-cluster` on real infrastructure
+(a VM, bare metal, or a CI runner with full nested-container support, e.g. a
+GitHub Actions Ubuntu runner) to get the actual proof. Treat any claim that
+Phase 2 "works" as unverified until that command has produced real
+`hubble observe` output — this file will be updated with that output once it
+exists.
+
+**Status**: manifests and cluster config written; cluster creation and Cilium
+Helm install verified; pod scheduling / live Hubble flow verification blocked
+in the build environment and not yet done anywhere else.
 
 ## Data flow (steady state, once Phase 2/3 land)
 

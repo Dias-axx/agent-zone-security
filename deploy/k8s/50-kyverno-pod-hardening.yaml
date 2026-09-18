@@ -1,0 +1,54 @@
+# Kyverno ClusterPolicies for agent-zone pod hardening. These are additive to the
+# namespace-level restricted Pod Security Standard (00-namespaces.yaml) — PSS
+# covers most of this already; Kyverno adds the two checks PSS does not: requiring
+# an explicit review annotation and validating image provenance is documented for
+# every agent pod (the "tool definition pinning" row in the README framework
+# mapping table).
+#
+# Requires the Kyverno admission controller installed separately
+# (helm install kyverno kyverno/kyverno -n kyverno --create-namespace).
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-agent-pod-annotations
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-owner-and-role-labels
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [agent-restricted, deploy-staging]
+      validate:
+        message: "Agent pods must carry 'owner' and 'role' labels matching registry/agents.yaml"
+        pattern:
+          metadata:
+            labels:
+              owner: "?*"
+              role: "?*"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-agent-pods
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: no-privileged-containers
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [agent-restricted, deploy-staging]
+      validate:
+        message: "Privileged containers are not permitted in an agent zone"
+        pattern:
+          spec:
+            =(securityContext):
+              =(privileged): "false"
+            containers:
+              - =(securityContext):
+                  =(privileged): "false"
