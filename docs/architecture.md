@@ -71,10 +71,45 @@ declarative YAML rules (`detection/rules/*.yaml`) against that schema using a
 restricted AST-based expression evaluator — never Python's `eval`.
 
 **Status**: rule evaluation against synthetic events is implemented and covered by
-the PoCs and tests. Live ingestion from an actual Hubble/OTel/Vault pipeline is
-Phase 3 scope — the normaliser functions exist and are unit-tested against
-representative payload shapes, but nothing in this repo yet consumes a real
-running cluster's event stream.
+the PoCs and tests. `go/cmd/flow-consumer` (Go, per the language split — see
+"Go components" below) parses real `hubble observe -o json` line shape into the
+same normalised schema and pipes it into `detection/consume_stream.py`, which
+evaluates it against the same rules. `poc/scenario_hubble_pipeline.sh` runs this
+whole path — Go binary piped into the Python module — for real, against
+synthetic-but-realistic Hubble JSON, and its `AGT-ZONE-001` output is real
+command output, not a fabricated example. What is still missing is the other
+end of that pipe: nothing in this repo has yet piped in a real, running
+cluster's actual `hubble observe` process — that gap is the same one blocking
+Phase 2's cluster verification (see "Cluster" below), not a separate problem.
+
+### Go components (`go/`)
+
+Three Go binaries, per the language split (Go 1.22+, `golangci-lint`, `go test`
+— no external dependencies, so no `go.sum`/module cache is needed):
+
+- `cmd/flow-consumer`: parses `hubble observe -o json` lines into the common
+  normalised event schema (`internal/flow`) and writes them as NDJSON to
+  stdout, to be piped into `detection/consume_stream.py`. Unit-tested against
+  representative Hubble JSON shapes, including malformed lines.
+- `cmd/response-controller`: a CLI running the same
+  `alert -> isolate -> revoke -> preserve -> terminate` chain as
+  `control/response.py` (`internal/response`), shelling out to `kubectl`
+  rather than importing `client-go`, kept dependency-free and testable via a
+  fake `Runner` in tests. Dry-run by default; only `--dry-run=false` reaches
+  `kubectl`.
+- `cmd/admission-webhook`: a `ValidatingAdmissionWebhook` (`internal/webhook`)
+  checking a pod's `agent-zone-control/zone` annotation against its
+  namespace's `zone` label — the runtime mirror of the registry/policy zone
+  check `control/validate.py` does at authoring time. Complements, not
+  replaces, `deploy/k8s/50-kyverno-pod-hardening.yaml`.
+
+**Status**: all three build, vet clean, and pass `golangci-lint` and their own
+`go test` suites (17 tests) against mocked `kubectl`/Kubernetes API calls and
+synthetic Hubble JSON — none of that required a live cluster. What has NOT been
+done: running `response-controller` or `admission-webhook` against a real
+Kubernetes API server, and running `flow-consumer` against a real `hubble`
+process's output rather than a synthetic fixture. Both depend on the same live
+cluster gap Phase 2 hit (see below).
 
 ### Cluster (`deploy/`)
 

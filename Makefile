@@ -1,4 +1,5 @@
-.PHONY: validate lint typecheck test poc cluster-up cluster-down deploy poc-cluster
+.PHONY: validate lint typecheck test poc poc-pipeline cluster-up cluster-down deploy poc-cluster \
+	go-fmt go-vet go-lint go-test go-build go-check
 
 validate:
 	python -m control.validate
@@ -18,6 +19,32 @@ poc:
 	python -m poc.scenario_and_gate
 	python -m poc.scenario_secret_harvest
 	python -m poc.scenario_denial_of_wallet
+
+# Go->Python pipeline PoC (Phase 3): builds go/cmd/flow-consumer and pipes
+# synthetic Hubble-shaped JSON through it into detection.consume_stream.
+# Verified against synthetic input only — see poc-cluster for the live-cluster
+# gap and docs/architecture.md.
+poc-pipeline:
+	./poc/scenario_hubble_pipeline.sh
+
+# Go component checks (go/). No external dependencies, so no go.sum/module
+# cache is needed.
+go-fmt:
+	cd go && test -z "$$(gofmt -l .)" || (gofmt -l . && exit 1)
+
+go-vet:
+	cd go && go vet ./...
+
+go-lint:
+	cd go && golangci-lint run ./...
+
+go-test:
+	cd go && go test ./...
+
+go-build:
+	cd go && go build ./...
+
+go-check: go-fmt go-vet go-lint go-test go-build
 
 # Phase 2: k3d + Cilium cluster. Verified up through cluster creation and Cilium's
 # control-plane images installing via Helm; pod-sandbox scheduling (Cilium's own

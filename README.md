@@ -124,6 +124,7 @@ agents/        deterministic mock agents (log_reader, deploy_assistant) + option
 poc/           reproducible attack/containment scenarios, each returns a process exit code
 tests/         pytest suite covering every deny path and the AND-gate
 deploy/        k3d/Cilium cluster config and Kubernetes manifests (zones, default-deny, egress gateway, Kyverno)
+go/            flow consumer, response controller, admission webhook (Go, no external dependencies)
 docs/          threat model, architecture notes, compliance mapping, ADRs
 ```
 
@@ -134,8 +135,9 @@ docs/          threat model, architecture notes, compliance mapping, ADRs
 | 1 | Registry, policy schema + examples, policy engine, mock agents | done |
 | 1.5 | Token issuer, audit log, response chain, pytest suite, CI | done |
 | 2 | k3d + Cilium, zone isolation, egress gateway, admission control | manifests written, cluster creation + Cilium install verified; pod scheduling/live Hubble flow **not yet verified anywhere** — see `docs/architecture.md` |
-| 3 | Detection engine: rule evaluation implemented against synthetic events; live Hubble/OTel/Vault ingestion not yet wired | partial |
+| 3 | Detection engine + Go flow-consumer: rule evaluation and the Go->Python pipeline verified against synthetic Hubble JSON (`make poc-pipeline`); live Hubble/OTel/Vault ingestion from a running cluster not yet wired (same gap as Phase 2) | partial |
 | 4 | Compliance mapping (EU AI Act, DORA, ISO 42001, NIST AI RMF, BAIT/MaRisk) | documented, honestly marked partial/documented-only — see `docs/compliance-mapping.md` |
+| 6 | Go: flow consumer, response controller, admission webhook — implemented, unit-tested (17 tests) against mocked `kubectl`/API calls and synthetic Hubble JSON; never run against a live cluster | partial |
 
 Demo agents are deterministic mocks so that proof-of-concepts run reproducibly in CI at zero cost.
 Real model APIs (Claude, GPT) are an optional adapter (`agents/adapters/llm.py`), not a dependency.
@@ -160,6 +162,18 @@ python -m poc.scenario_and_gate          # delegated agent cannot exceed its hum
 python -m poc.scenario_secret_harvest    # secret-store access + exfiltration contained and detected
 python -m poc.scenario_denial_of_wallet  # high-volume tool calls flagged, response chain escalated
 ```
+
+### Go components
+
+```bash
+make go-check      # gofmt, go vet, golangci-lint, go test, go build (go/)
+make poc-pipeline   # Go flow-consumer piped into Python detection engine, synthetic Hubble JSON
+```
+
+`poc-pipeline` builds `go/cmd/flow-consumer` and pipes synthetic-but-realistic
+`hubble observe -o json` lines through it into `detection/consume_stream.py`,
+printing the real `AGT-ZONE-001` match it produces. This proves the Go->Python
+boundary; it is not a live-cluster proof (see Cluster below).
 
 ### Cluster (Phase 2, unverified — read this before running)
 
@@ -202,6 +216,13 @@ nested-container support) to get the actual proof.
   blocked by a containerd/runc failure specific to the sandbox this repo was built in (see
   `docs/architecture.md`). Do not treat Phase 2 as proven until `make poc-cluster` has actually been
   run successfully and its `hubble observe` output captured.
+- **Go components are unit-tested, not live-tested.** `go/cmd/response-controller` and
+  `go/cmd/admission-webhook` shell out to `kubectl` / call the Kubernetes API respectively; both are
+  tested against fakes only (`internal/response`, `internal/webhook`). Neither has been run against a
+  real API server. `go/cmd/flow-consumer` is tested against synthetic Hubble JSON
+  (`make poc-pipeline`), not a live `hubble observe` process — its JSON field mapping
+  (`go/internal/flow/hubble.go`) is a best-effort guess at Hubble's schema and may need adjusting
+  against a real Cilium version's actual output.
 - No customer, employer or production data is used anywhere in this repository. All scenarios are
   synthetic.
 
