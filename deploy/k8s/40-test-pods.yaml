@@ -1,0 +1,77 @@
+# Test fixtures for the Phase 2 acceptance scenario (poc/scenario_zone_cluster.sh):
+# a curl-capable pod playing the log-reader agent in its home zone, and a plain
+# target pod in corp-prod it has no business reaching. Both run as non-root with
+# all capabilities dropped, satisfying the namespaces' restricted Pod Security
+# Standard (00-namespaces.yaml).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: agent-probe
+  namespace: agent-restricted
+  labels:
+    app: agent-probe
+    role: read-only-agent
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: probe
+      image: curlimages/curl:8.10.1
+      command: ["sleep", "infinity"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: corp-prod-target
+  namespace: corp-prod
+  labels:
+    app: corp-prod-target
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: target
+      image: nginxinc/nginx-unprivileged:1.27-alpine
+      ports:
+        - containerPort: 8080
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+        readOnlyRootFilesystem: true
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: cache
+          mountPath: /var/cache/nginx
+        - name: run
+          mountPath: /var/run
+  volumes:
+    - name: tmp
+      emptyDir: {}
+    - name: cache
+      emptyDir: {}
+    - name: run
+      emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: corp-prod-target
+  namespace: corp-prod
+spec:
+  selector:
+    app: corp-prod-target
+  ports:
+    - port: 8080
+      targetPort: 8080

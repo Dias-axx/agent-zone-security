@@ -1,0 +1,48 @@
+# Zones. Namespace == zone (README architecture: "Namespace = zone; cross-zone
+# traffic only via explicit, reviewed policy"). Each namespace is labelled with the
+# zone name it represents so NetworkPolicies can select by `zone` label rather than
+# hardcoding namespace names, and the restricted Pod Security Standard is enforced
+# at the namespace level as baseline pod hardening independent of Cilium.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-restricted
+  labels:
+    zone: agent-restricted
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: deploy-staging
+  labels:
+    zone: deploy-staging
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+# corp-prod is NOT in any role's zones.reachable list (see policy/examples/*.yaml).
+# It exists in this manifest set only as the containment PoC's deny target: proof
+# that a namespace outside the agent's declared zones is unreachable even though it
+# lives in the same cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: corp-prod
+  labels:
+    zone: corp-prod
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: egress-gateway
+  labels:
+    zone: egress-gateway
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

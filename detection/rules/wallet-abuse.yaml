@@ -1,0 +1,6 @@
+rule_id: AGT-WALLET-001
+name: Denial-of-wallet call volume
+mitre_atlas: "MITRE ATLAS (2026 mapping) - AML.T0034 Cost Harvesting"
+owasp_asi: "OWASP Top 10 for Agentic Applications (Dec 2025) - Resource Exhaustion / Denial of Wallet"
+severity: medium
+logic: "kind == 'tool' and call_count > 20"

@@ -1,0 +1,29 @@
+role: deploy-agent
+
+identity:
+  type: delegated
+  delegates_scope_from: alice@example.internal
+  ttl_seconds: 1800
+
+capabilities:
+  tools:
+    - deploy.plan
+    - deploy.stage
+    - deploy.apply
+    - deploy.rollback
+  confirm_required:
+    - deploy.apply
+
+egress:
+  default: deny
+  allowlist:
+    - .ci.example.com
+    - registry.example.com
+
+zones:
+  home: agent-restricted
+  reachable:
+    - deploy-staging
+
+response:
+  on_violation: isolate

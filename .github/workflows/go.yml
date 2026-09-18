@@ -1,0 +1,38 @@
+name: go
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false
+      - name: gofmt check
+        run: |
+          cd go
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "gofmt needs to be run on:"; echo "$UNFORMATTED"; exit 1
+          fi
+      - name: go vet
+        run: cd go && go vet ./...
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: go
+      - name: go test
+        run: cd go && go test ./...
+      - name: go build
+        run: cd go && go build ./...
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Go->Python pipeline PoC
+        run: ./poc/scenario_hubble_pipeline.sh

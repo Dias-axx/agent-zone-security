@@ -1,0 +1,6 @@
+rule_id: AGT-EGRESS-001
+name: Non-allowlisted egress attempt
+mitre_atlas: "MITRE ATLAS (2026 mapping) - AML.T0025 Exfiltration via Cyber Means"
+owasp_asi: "OWASP Top 10 for Agentic Applications (Dec 2025) - Tool Misuse"
+severity: high
+logic: "kind == 'egress' and verdict == 'deny'"

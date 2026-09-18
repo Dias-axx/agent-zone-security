@@ -1,0 +1,34 @@
+# k3d cluster definition for agent-zone-control.
+#
+# The default CNI (flannel) and k3s's built-in NetworkPolicy controller are both
+# disabled here so Cilium can own both the dataplane and policy enforcement.
+# Cilium is chosen over Calico specifically for Hubble flow visibility and the
+# later eBPF-based egress path (see docs/adr/0001-cilium-over-calico.md); it is
+# installed separately via Helm after cluster creation (make cluster-up).
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: agent-zone-control
+servers: 1
+agents: 1
+kubeAPI:
+  hostPort: "6550"
+image: rancher/k3s:v1.31.5-k3s1
+options:
+  k3d:
+    wait: true
+    timeout: "120s"
+    disableLoadbalancer: false
+  k3s:
+    extraArgs:
+      # Disable the built-in CNI (flannel) and its default-deny/allow NetworkPolicy
+      # controller so Cilium is the sole owner of pod networking and policy.
+      - arg: --flannel-backend=none
+        nodeFilters:
+          - server:*
+      - arg: --disable-network-policy
+        nodeFilters:
+          - server:*
+      - arg: --disable=traefik
+        nodeFilters:
+          - server:*

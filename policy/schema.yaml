@@ -1,0 +1,41 @@
+# Capability policy schema (documentation, not machine-enforced JSON Schema).
+# control/validate.py encodes the actual enforced rules; this file documents intent.
+#
+# role: string, required. Human-readable role name, referenced by registry/agents.yaml.
+#
+# identity:
+#   type: "standalone" | "delegated", required.
+#     - standalone: the agent's own capabilities.tools is the effective scope.
+#     - delegated: effective scope is intersection(capabilities.tools, delegating user's scope).
+#       A delegated agent can never exceed the human it acts for (the AND gate).
+#   delegates_scope_from: string, required if type == delegated. Identity of the human
+#     whose scope this agent's permissions are intersected with.
+#   ttl_seconds: int, required. Capability token lifetime. Hard ceiling 3600s
+#     (control/token_issuer.py MAX_TTL_SECONDS) — any higher value is a validation error.
+#
+# capabilities:
+#   tools: list[string], required. The role's own tool allowlist.
+#   confirm_required: list[string], required (may be empty). Tools in this list resolve
+#     to CONFIRM, never ALLOW, even when in scope. The caller must resolve confirmation
+#     through an explicit approval path.
+#   data_scope: optional. Used by data-access roles (e.g. rag-agent) to declare
+#     per-collection access, independent of the network egress boundary.
+#     collections: list of {name: string, access: "read" | "none"}
+#
+# egress:
+#   default: must be the literal string "deny". Any other value is a malformed policy
+#     and the engine resolves it as a denial, not a permissive fallback.
+#   allowlist: list[string]. Exact hostname match, or suffix match for entries with a
+#     leading dot (".example.com"). No other wildcard syntax is permitted — entries
+#     containing "*", the literal ".", or empty strings are rejected by the validator.
+#
+# zones:
+#   home: string, required. Must match the zone declared for this agent in
+#     registry/agents.yaml.
+#   reachable: list[string]. Additional zones this role may cross into. Everything
+#     else is denied with rule id AGT-ZONE-001.
+#
+# response:
+#   on_violation: "alert" | "isolate" | "revoke" | "terminate", required.
+#     Selects the escalation depth run by control/response.py on a policy violation.
+#     There is no global default — every role must declare its own.

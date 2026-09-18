@@ -1,0 +1,32 @@
+# Default-deny ingress and egress for every zone. This is the network-layer
+# equivalent of egress.default: deny in the policy schema (policy/schema.yaml) —
+# a missing explicit allow is a denial, not a permissive fallback, enforced here by
+# Cilium via a standard Kubernetes NetworkPolicy (no CiliumNetworkPolicy CRD
+# dependency, so this also works if Cilium is later swapped for another
+# NetworkPolicy-capable CNI).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: agent-restricted
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: deploy-staging
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: corp-prod
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]

@@ -1,0 +1,42 @@
+# The only non-DNS egress agent-restricted and deploy-staging pods get: the
+# egress-gateway pod, and nothing else. Direct connections anywhere else (including
+# the public internet and other zones) stay denied by 10-default-deny.yaml.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-gateway
+  namespace: agent-restricted
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              zone: egress-gateway
+          podSelector:
+            matchLabels:
+              app: egress-gateway
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-gateway
+  namespace: deploy-staging
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              zone: egress-gateway
+          podSelector:
+            matchLabels:
+              app: egress-gateway
+      ports:
+        - protocol: TCP
+          port: 8080

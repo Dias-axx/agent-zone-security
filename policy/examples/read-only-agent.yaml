@@ -1,0 +1,23 @@
+role: read-only-agent
+
+identity:
+  type: standalone
+  ttl_seconds: 900
+
+capabilities:
+  tools:
+    - log.read
+    - log.search
+  confirm_required: []
+
+egress:
+  default: deny
+  allowlist:
+    - .internal-logs.example.com
+
+zones:
+  home: agent-restricted
+  reachable: []
+
+response:
+  on_violation: alert

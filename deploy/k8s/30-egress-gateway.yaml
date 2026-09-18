@@ -1,0 +1,97 @@
+# Egress gateway placeholder. This deploys a single pod that agent-restricted and
+# deploy-staging are allowed to reach and nothing else is (see 31-allow-egress-gateway.yaml).
+# It is deliberately a stand-in (nginx) for the "forced proxy egress" control the
+# README describes, not a working forward/CONNECT proxy — building and hardening a
+# real one (mTLS, per-agent identity, request logging in the audit schema) is out of
+# scope for this reference implementation. This is a documented limitation, not a
+# hidden gap: what this manifest set actually proves is the *policy* shape (only
+# the gateway is reachable, nothing else), which is the part detection depends on.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: egress-gateway
+  namespace: egress-gateway
+  labels:
+    app: egress-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: egress-gateway
+  template:
+    metadata:
+      labels:
+        app: egress-gateway
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: egress-gateway
+          image: nginxinc/nginx-unprivileged:1.27-alpine
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: run
+              mountPath: /var/run
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: egress-gateway
+  namespace: egress-gateway
+spec:
+  selector:
+    app: egress-gateway
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: egress-gateway
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-from-agent-zones
+  namespace: egress-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: egress-gateway
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              zone: agent-restricted
+        - namespaceSelector:
+            matchLabels:
+              zone: deploy-staging
+      ports:
+        - protocol: TCP
+          port: 8080
