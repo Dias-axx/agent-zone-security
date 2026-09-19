@@ -111,6 +111,28 @@ Kubernetes API server, and running `flow-consumer` against a real `hubble`
 process's output rather than a synthetic fixture. Both depend on the same live
 cluster gap Phase 2 hit (see below).
 
+### Egress gateway (`deploy/mitmproxy/`)
+
+A mitmproxy-based TLS-terminating forward proxy replacing the earlier nginx
+placeholder. `deploy/mitmproxy/policy_addon.py` imports
+`control.policy_engine.evaluate_egress` directly — the same egress-allowlist
+code every other enforcement point uses, not a second implementation — keyed
+by an `X-Agent-Id` request header. See
+`docs/adr/0002-tls-terminating-egress-gateway.md` for why mitmproxy over
+Envoy and the named follow-ups (mTLS agent identity, CA trust distribution).
+
+**Status**: `evaluate_request()` is unit-tested directly
+(`tests/test_mitmproxy_addon.py`). The image (`deploy/mitmproxy/Dockerfile`)
+was built and run as a standalone container in this repo's build session —
+real proxied HTTP requests through the running mitmproxy process produced
+real allow/deny decisions (captured in the ADR), including a fail-closed
+deny for an unrecognised agent id and an actual killed connection for a
+denied destination. Building it caught a real bug (PyYAML isn't bundled in
+the mitmproxy base image), fixed in the Dockerfile. Not yet done: deploying
+it into the k3d/Cilium cluster from Phase 2 (still blocked — see below) to
+confirm the NetworkPolicy-restricted reachability and Hubble/audit-log
+integration end to end.
+
 ### Cluster (`deploy/`)
 
 `deploy/k3d/cluster.yaml` defines a k3d cluster with the default CNI (flannel)

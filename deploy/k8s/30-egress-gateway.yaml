@@ -1,11 +1,21 @@
-# Egress gateway placeholder. This deploys a single pod that agent-restricted and
-# deploy-staging are allowed to reach and nothing else is (see 31-allow-egress-gateway.yaml).
-# It is deliberately a stand-in (nginx) for the "forced proxy egress" control the
-# README describes, not a working forward/CONNECT proxy — building and hardening a
-# real one (mTLS, per-agent identity, request logging in the audit schema) is out of
-# scope for this reference implementation. This is a documented limitation, not a
-# hidden gap: what this manifest set actually proves is the *policy* shape (only
-# the gateway is reachable, nothing else), which is the part detection depends on.
+# Egress gateway: a TLS-terminating forward proxy (mitmproxy + this repo's own
+# control.policy_engine, see deploy/mitmproxy/) that agent-restricted and
+# deploy-staging are allowed to reach and nothing else is (see
+# 31-allow-egress-gateway.yaml). It enforces the same egress allowlist as
+# control/policy_engine.py's evaluate_egress, not a reimplementation — see
+# deploy/mitmproxy/policy_addon.py and docs/adr/0002-tls-terminating-egress-gateway.md.
+#
+# Build and push deploy/mitmproxy/Dockerfile before applying this manifest;
+# replace `image:` below with wherever you pushed it. This has not been
+# deployed against a live cluster — see docs/architecture.md and
+# docs/live-verification-runbook.md.
+#
+# Known limitation even once live: the mitmproxy CA is generated on first
+# container start into an emptyDir, so it rotates on every pod restart.
+# Distributing that CA to agent pods' trust stores is a manual step for now
+# (see the ADR) — this manifest proves the proxy topology, real-policy
+# enforcement, and audit-log integration; it does not automate CA trust
+# distribution.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,12 +35,12 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        runAsUser: 101
+        runAsUser: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: egress-gateway
-          image: nginxinc/nginx-unprivileged:1.27-alpine
+          image: ghcr.io/dias-axx/agent-zone-control-egress-gateway:latest # nach `make egress-gateway-image` ersetzen
           ports:
             - containerPort: 8080
           securityContext:
@@ -41,16 +51,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            - name: cache
-              mountPath: /var/cache/nginx
-            - name: run
-              mountPath: /var/run
+            - name: mitmproxy-confdir
+              mountPath: /home/mitmproxy/.mitmproxy
       volumes:
         - name: tmp
           emptyDir: {}
-        - name: cache
-          emptyDir: {}
-        - name: run
+        - name: mitmproxy-confdir
           emptyDir: {}
 ---
 apiVersion: v1

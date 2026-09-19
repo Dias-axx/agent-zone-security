@@ -1,5 +1,5 @@
-.PHONY: validate lint typecheck test poc poc-pipeline cluster-up cluster-down deploy poc-cluster \
-	go-fmt go-vet go-lint go-test go-build go-check
+.PHONY: validate lint typecheck test poc poc-pipeline cluster-up cluster-down deploy \
+	poc-cluster egress-gateway-image go-fmt go-vet go-lint go-test go-build go-check
 
 validate:
 	python -m control.validate
@@ -19,6 +19,7 @@ poc:
 	python -m poc.scenario_and_gate
 	python -m poc.scenario_secret_harvest
 	python -m poc.scenario_denial_of_wallet
+	python -m poc.scenario_tool_output_anomaly
 
 # Go->Python pipeline PoC (Phase 3): builds go/cmd/flow-consumer and pipes
 # synthetic Hubble-shaped JSON through it into detection.consume_stream.
@@ -83,3 +84,13 @@ deploy:
 
 poc-cluster:
 	./poc/scenario_zone_cluster.sh
+
+# Builds the TLS-terminating egress gateway image (mitmproxy + this repo's own
+# policy engine, see deploy/mitmproxy/). Push it and update the `image:` field
+# in deploy/k8s/30-egress-gateway.yaml before `make deploy`. Built and run
+# standalone (not yet in-cluster) in this repo's build session with real
+# allow/deny output captured — see docs/adr/0002-tls-terminating-egress-gateway.md.
+EGRESS_GATEWAY_IMAGE := agent-zone-control-egress-gateway:latest
+
+egress-gateway-image:
+	docker build -f deploy/mitmproxy/Dockerfile -t $(EGRESS_GATEWAY_IMAGE) .

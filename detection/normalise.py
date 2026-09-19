@@ -11,9 +11,9 @@ from typing import Any
 
 @dataclass(frozen=True)
 class NormalisedEvent:
-    source: str  # "hubble" | "proxy" | "otel" | "vault" | "policy_engine"
+    source: str  # "hubble" | "proxy" | "otel" | "vault" | "policy_engine" | "output_scanner"
     agent_id: str
-    kind: str  # "zone" | "egress" | "tool" | "secret_access"
+    kind: str  # "zone" | "egress" | "tool" | "secret_access" | "tool_output"
     target: str
     verdict: str  # "allow" | "deny" | "unknown"
     raw: dict[str, Any]
@@ -48,6 +48,22 @@ def from_otel_trace(span: dict[str, Any]) -> NormalisedEvent:
         target=span.get("name", "unknown"),
         verdict=attributes.get("policy.decision", "unknown"),
         raw=span,
+    )
+
+
+def from_tool_output_scan(agent_id: str, tool: str, marker: str) -> NormalisedEvent:
+    """One event per heuristic marker found by detection.output_scanner in a
+    tool's output. verdict is always "deny" here in the sense of "this marker
+    should not be present" — it is not a policy engine decision, it is a
+    content-inspection finding (see detection/output_scanner.py's docstring
+    for what that does and does not prove)."""
+    return NormalisedEvent(
+        source="output_scanner",
+        agent_id=agent_id,
+        kind="tool_output",
+        target=tool,
+        verdict="deny",
+        raw={"marker": marker},
     )
 
 

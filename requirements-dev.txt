@@ -3,3 +3,7 @@ ruff>=0.6
 mypy>=1.11
 pytest>=8.0
 types-PyYAML
+# Optional at runtime (see control/revocation_backends.py) — installed here only
+# so its import-guarded code path is actually exercised by the test suite,
+# against a fake client, with no real Redis server required.
+redis>=5.0
