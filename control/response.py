@@ -64,9 +64,15 @@ def isolate(agent_id: str, *, dry_run: bool = True) -> ResponseEvent:
 def revoke(
     agent_id: str, token_id: str, issuer: TokenIssuer | None, *, dry_run: bool = True
 ) -> ResponseEvent:
-    if not dry_run and issuer is not None:
+    if not dry_run:
+        # Fail closed: a live revoke with no issuer to revoke against must not be
+        # allowed to fall through and report "revoke token X" as if it happened.
+        if issuer is None:
+            raise ValueError("revoke: issuer is required when dry_run=False")
         issuer.revoke(token_id)
-    detail = f"revoke token {token_id}" if not dry_run else f"[dry-run] would revoke token {token_id}"
+        detail = f"revoke token {token_id}"
+    else:
+        detail = f"[dry-run] would revoke token {token_id}"
     return ResponseEvent(agent_id, ResponseAction.REVOKE, dry_run, detail)
 
 

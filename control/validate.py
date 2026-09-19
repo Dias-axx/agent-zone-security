@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 
+from control.policy_engine import is_valid_egress_entry
 from control.response import ESCALATION_CHAIN
 from control.token_issuer import MAX_TTL_SECONDS
 
@@ -37,10 +38,6 @@ def load_yaml(path: Path) -> dict[str, Any]:
     return dict(data) if data else {}
 
 
-def _is_valid_egress_entry(entry: str) -> bool:
-    return bool(entry) and entry != "." and "*" not in entry
-
-
 def validate_policy(policy_path: Path) -> list[str]:
     if not policy_path.exists():
         return [f"{policy_path}: file does not exist"]
@@ -55,7 +52,7 @@ def validate_policy(policy_path: Path) -> list[str]:
     if egress.get("default") != "deny":
         errors.append(f"{policy_path}: egress.default must be 'deny'")
     for entry in egress.get("allowlist", []):
-        if not _is_valid_egress_entry(entry):
+        if not is_valid_egress_entry(entry):
             errors.append(f"{policy_path}: malformed egress allowlist entry '{entry}'")
 
     identity = policy.get("identity", {})

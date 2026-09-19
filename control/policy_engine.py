@@ -38,7 +38,7 @@ def _is_delegated(policy: dict[str, Any]) -> bool:
     return bool(policy.get("identity", {}).get("type") == "delegated")
 
 
-def _effective_tool_scope(policy: dict[str, Any], delegating_scope: set[str] | None) -> set[str]:
+def effective_tool_scope(policy: dict[str, Any], delegating_scope: set[str] | None) -> set[str]:
     role_scope = set(policy.get("capabilities", {}).get("tools", []))
     if _is_delegated(policy):
         # AND gate: a delegated agent's effective permission is the intersection of
@@ -54,7 +54,7 @@ def _effective_tool_scope(policy: dict[str, Any], delegating_scope: set[str] | N
 def evaluate_tool(
     policy: dict[str, Any], request: Request, delegating_scope: set[str] | None = None
 ) -> Verdict:
-    scope = _effective_tool_scope(policy, delegating_scope)
+    scope = effective_tool_scope(policy, delegating_scope)
     confirm_set = set(policy.get("capabilities", {}).get("confirm_required", []))
 
     if request.target not in scope:
@@ -71,7 +71,7 @@ def evaluate_tool(
     return Verdict(Decision.ALLOW, f"tool '{request.target}' permitted", "AGT-TOOL-OK", request)
 
 
-def _is_valid_egress_entry(entry: str) -> bool:
+def is_valid_egress_entry(entry: str) -> bool:
     if not entry or entry == "." or "*" in entry:
         return False
     return True
@@ -90,7 +90,7 @@ def evaluate_egress(policy: dict[str, Any], request: Request) -> Verdict:
 
     allowlist = egress.get("allowlist", [])
     for entry in allowlist:
-        if not _is_valid_egress_entry(entry):
+        if not is_valid_egress_entry(entry):
             return Verdict(
                 Decision.DENY,
                 f"malformed allowlist entry '{entry}'; policy resolved as denial",

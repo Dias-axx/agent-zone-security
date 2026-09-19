@@ -205,6 +205,13 @@ nested-container support) to get the actual proof.
   workloads without retraining against real traffic.
 - **No multi-agent delegation chains.** The AND gate is evaluated one hop deep (agent → the human it
   is delegated from). An agent delegating to another agent is not modelled.
+- **`data_scope` (per-collection access) is declared but not enforced.** `policy/examples/rag-agent.yaml`
+  declares `hr-confidential: access: none`, but `control/policy_engine.py`'s `evaluate_tool` only checks
+  the tool name (`docstore.query`) against the role's scope — it never reads `data_scope`, so a role with
+  `docstore.query` can query any collection regardless of what `data_scope` says. Enforcing this properly
+  needs a resource/collection field threaded through `Request`, every call site, and the mock agents —
+  a design decision, not a local fix, so it is named here rather than half-implemented. Found in review;
+  left open deliberately.
 - **Single-process token revocation and audit log.** `TokenIssuer` revocation state and the JSONL
   audit log both live in a single process/file in this reference implementation. A production
   deployment needs a shared revocation store and a real log pipeline.
