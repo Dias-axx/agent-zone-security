@@ -238,8 +238,16 @@ nested-container support) to get the actual proof.
   random secret per instance, so multiple processes can't verify each other's tokens unless a shared
   secret is explicitly passed in — secret distribution is a deployment concern this module deliberately
   does not solve). `control/audit.py`'s `AuditLog` now dispatches to multiple `AuditSink`s
-  (`JSONLFileSink` always, plus optional `SyslogSink` for a SIEM). None of this has been run against a
-  real Redis or syslog collector — unit-tested against fakes only.
+  (`JSONLFileSink` always, plus optional `SyslogSink` for a SIEM). The Redis and syslog paths are
+  unit-tested against fakes only, not a real Redis/syslog collector. A third sink,
+  `control/coding_agent_monitor_sink.py`'s `CodingAgentMonitorSink`, forwards each record to a running
+  [Coding-Agent-Monitor](https://github.com/Dias-axx/coding-agent-monitor) instance as a live log line
+  (`allow`/`confirm` → stdout, `deny` → stderr) so its dashboard shows policy verdicts next to normal
+  session logs — **this one was verified end to end**: a real monitor instance was started, records were
+  written through the real sink, and `GET /api/agents/:id` showed both log lines with the correct
+  streams. It is explicitly a best-effort, non-durable convenience view (matching the monitor's own
+  stance and its lack of authentication) — never a replacement for `JSONLFileSink`/`SyslogSink`, and a
+  forwarding failure is swallowed and logged to stderr, never raised into the policy-evaluation path.
 - **No live cluster wiring yet.** The response chain's `isolate`/`terminate` actions are dry-run only;
   the detection engine evaluates rules against synthetic events, not a running Cilium/OTel/Vault
   pipeline. See [Phase status](#phase-status).

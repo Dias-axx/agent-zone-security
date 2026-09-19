@@ -42,8 +42,21 @@ issued the token.
 Append-only JSONL. Every policy evaluation is recorded, including allows — this is
 what makes "prove this agent's action history" possible after the fact. The record
 schema is stable so a SIEM forwarder can be attached without a schema change.
+`AuditLog` dispatches each record to a `JSONLFileSink` (always) plus any configured
+`extra_sinks`: `SyslogSink` (stdlib-only, for a syslog-speaking SIEM) and
+`control/coding_agent_monitor_sink.py`'s `CodingAgentMonitorSink`, which forwards to
+a running [Coding-Agent-Monitor](https://github.com/Dias-axx/coding-agent-monitor)
+instance as a live per-agent log line.
 
-**Status**: implemented (Phase 1), local file backend only.
+**Status**: `JSONLFileSink` implemented and always on (Phase 1).
+`CodingAgentMonitorSink` verified end to end in this repo's build session — a real
+monitor instance was started, records were written through the real sink over HTTP,
+and `GET /api/agents/:id` showed the expected log lines with `allow`→stdout,
+`deny`→stderr classification. `SyslogSink` and `RedisRevocationStore` (see Token
+Issuer below) are unit-tested against fakes only, not a real collector/Redis. All
+three extra sinks/stores are explicitly secondary: `JSONLFileSink` (or a real SIEM
+pipeline) stays the source of truth, since Coding-Agent-Monitor is itself
+best-effort, in-memory and unauthenticated by its own design.
 
 ### Response Chain (`control/response.py`)
 
