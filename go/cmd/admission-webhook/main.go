@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/dias-axx/agent-zone-control/go/internal/webhook"
 )
@@ -22,6 +23,13 @@ import (
 const (
 	serviceAccountTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 	serviceAccountCAPath    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+
+	// apiServerRequestTimeout bounds the namespace lookup against the
+	// Kubernetes API. Without it, an unresponsive API server would hang this
+	// request indefinitely (net/http.Client has no default timeout), leaking
+	// the connection and, per admitted pod, eventually exhausting the
+	// webhook's own connection pool instead of failing closed quickly.
+	apiServerRequestTimeout = 5 * time.Second
 )
 
 type k8sNamespace struct {
@@ -84,7 +92,7 @@ func main() {
 	keyFile := envOr("TLS_KEY_FILE", "/etc/webhook/tls.key")
 	apiServerURL := envOr("KUBERNETES_API_SERVER", "https://kubernetes.default.svc")
 
-	httpClient := &http.Client{}
+	httpClient := &http.Client{Timeout: apiServerRequestTimeout}
 	if caCert, err := os.ReadFile(serviceAccountCAPath); err == nil {
 		pool := tlsCertPoolFromPEM(caCert)
 		httpClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}

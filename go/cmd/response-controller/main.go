@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/dias-axx/agent-zone-control/go/internal/response"
 )
@@ -38,7 +39,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	anyFailed := false
 	for _, event := range events {
 		fmt.Printf("[RESPONSE:%s] dry_run=%t agent=%s %s\n", event.Action, event.DryRun, event.AgentID, event.Detail)
+		if strings.HasPrefix(event.Detail, "FAILED") {
+			anyFailed = true
+		}
+	}
+
+	// A live isolate/terminate call that failed against the cluster is reported
+	// via the event's Detail string, not a non-nil error from Escalate (see
+	// internal/response.Controller.isolate/terminate) — a caller that only
+	// checks the process exit code must still be able to tell containment
+	// didn't happen.
+	if anyFailed {
+		os.Exit(1)
 	}
 }
