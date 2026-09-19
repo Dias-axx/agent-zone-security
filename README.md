@@ -188,8 +188,11 @@ These targets do what was actually run while building this repo, up to a point:
 `cluster-up` succeeds (cluster creates, Cilium's Helm chart installs cleanly), but
 in that build environment no pod — Cilium's own DaemonSet included — ever reached
 `Running`, so `deploy` and `poc-cluster` were never confirmed. See
-`docs/architecture.md` for the exact failure and the diagnosis performed. Run
-these on real infrastructure (a VM, bare metal, or a CI runner with full
+`docs/architecture.md` for the exact failure and the diagnosis performed, and
+`docs/live-verification-runbook.md` for a step-by-step guide (prerequisites,
+checkpoints, what the real output should look like) to running this on
+infrastructure that doesn't have that limitation. Run these on real infrastructure
+(a VM, bare metal, or a CI runner with full
 nested-container support) to get the actual proof.
 
 ## Known limitations
