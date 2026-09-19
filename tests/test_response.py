@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from control.response import ResponseAction, escalate
+from control.response import ResponseAction, escalate, revoke
+from control.token_issuer import TokenIssuer
 
 
 def test_alert_only_chain() -> None:
@@ -32,3 +33,16 @@ def test_all_events_are_dry_run_by_default_chain() -> None:
 def test_unknown_on_violation_raises() -> None:
     with pytest.raises(ValueError):
         escalate("a1", "nonsense", dry_run=True)
+
+
+def test_live_revoke_without_issuer_fails_closed() -> None:
+    with pytest.raises(ValueError):
+        revoke("a1", "tok-1", None, dry_run=False)
+
+
+def test_live_revoke_with_issuer_actually_revokes() -> None:
+    issuer = TokenIssuer()
+    token = issuer.issue(agent_id="a1", role="r", session_id="s1", scope=set(), ttl_seconds=60)
+    event = revoke("a1", token.token_id, issuer, dry_run=False)
+    assert event.dry_run is False
+    assert not issuer.verify(token)

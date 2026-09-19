@@ -1,7 +1,18 @@
 """Short-lived capability tokens bound to (agent_id, role, session_id, scope).
 
-Tokens are signed with HMAC-SHA256 using a secret generated at runtime (per
-TokenIssuer instance) — no bespoke crypto scheme, no persisted key material.
+Tokens are signed with HMAC-SHA256. The signing secret and the revocation set
+are both pluggable (see `secret` and `revocation_store` on TokenIssuer):
+
+- By default, TokenIssuer generates a fresh random secret per instance and
+  keeps revocations in an in-memory set — the original v1 behaviour, correct
+  for a single process (tests, PoCs, a single-replica deployment).
+- For multiple processes/replicas to verify each other's tokens and see each
+  other's revocations, both need to be shared: pass the same `secret` bytes
+  to every TokenIssuer instance (loaded from a shared secret store — this
+  module does not fetch one for you, deliberately: secret distribution is a
+  deployment concern, not something to bake in here) and a shared
+  `RevocationStore` (see control.revocation_backends.RedisRevocationStore for
+  an optional, import-guarded option).
 """
 
 from __future__ import annotations
@@ -12,6 +23,7 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass
+from typing import Protocol
 
 MAX_TTL_SECONDS = 3600
 
@@ -33,10 +45,40 @@ class CapabilityToken:
     signature: str
 
 
-class TokenIssuer:
+class RevocationStore(Protocol):
+    """Tracks revoked token ids. Implementations must fail closed: if a
+    revocation store cannot be reached to answer is_revoked(), that is not
+    the same as "not revoked" and callers should treat it as revoked (see
+    control.revocation_backends.RedisRevocationStore's docstring)."""
+
+    def revoke(self, token_id: str) -> None: ...
+    def is_revoked(self, token_id: str) -> bool: ...
+
+
+class InMemoryRevocationStore:
+    """The v1 behaviour: a plain set, scoped to this process. Correct for a
+    single-process deployment; a second process (a second replica, a second
+    CLI invocation) never sees revocations made here."""
+
     def __init__(self) -> None:
-        self._secret = secrets.token_bytes(32)
         self._revoked: set[str] = set()
+
+    def revoke(self, token_id: str) -> None:
+        self._revoked.add(token_id)
+
+    def is_revoked(self, token_id: str) -> bool:
+        return token_id in self._revoked
+
+
+class TokenIssuer:
+    def __init__(
+        self,
+        *,
+        secret: bytes | None = None,
+        revocation_store: RevocationStore | None = None,
+    ) -> None:
+        self._secret = secret if secret is not None else secrets.token_bytes(32)
+        self._revocation_store: RevocationStore = revocation_store or InMemoryRevocationStore()
 
     def _payload(
         self,
@@ -94,7 +136,7 @@ class TokenIssuer:
         )
 
     def verify(self, token: CapabilityToken) -> bool:
-        if token.token_id in self._revoked:
+        if self._revocation_store.is_revoked(token.token_id):
             return False
         if time.time() > token.expires_at:
             return False
@@ -111,4 +153,4 @@ class TokenIssuer:
         return hmac.compare_digest(expected, token.signature)
 
     def revoke(self, token_id: str) -> None:
-        self._revoked.add(token_id)
+        self._revocation_store.revoke(token_id)

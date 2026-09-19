@@ -54,6 +54,20 @@ func TestEscalateUnknownOnViolationErrors(t *testing.T) {
 	}
 }
 
+func TestEscalateRejectsAgentIDWithManifestBreakingCharacters(t *testing.T) {
+	runner := &fakeRunner{}
+	c := NewController(runner, "agent-restricted")
+	// agentID is interpolated directly into a YAML manifest (isolate); a value
+	// like this would inject/corrupt fields in that manifest if not rejected.
+	badAgentID := "agt-1\n  namespace: kube-system"
+	if _, err := c.Escalate(context.Background(), badAgentID, "tok-1", "isolate", true); err == nil {
+		t.Fatal("expected an error for an agent id containing YAML-breaking characters, got nil")
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("runner was called %d times for a rejected agent id, want 0", len(runner.calls))
+	}
+}
+
 func TestEscalateDryRunNeverCallsRunner(t *testing.T) {
 	runner := &fakeRunner{}
 	c := NewController(runner, "agent-restricted")

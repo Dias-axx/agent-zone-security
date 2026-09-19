@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections import defaultdict
 from typing import Any
 
 from detection.engine import DetectionRule, evaluate_event, load_rules
@@ -36,6 +37,12 @@ def parse_line(line: str) -> NormalisedEvent:
 
 def consume(lines: Any, rules: list[DetectionRule]) -> int:
     triggered_count = 0
+    # Running per-agent tool-call total for this stream. detection/rules/wallet-abuse.yaml
+    # ("call_count > 20") needs this counter in the evaluation context; without it the
+    # rule can never match a real event (an unknown identifier makes rule evaluation a
+    # no-match, not an error - see detection/engine.py), so AGT-WALLET-001 would never
+    # fire outside of a test that injects call_count by hand.
+    tool_call_counts: dict[str, int] = defaultdict(int)
     for raw_line in lines:
         line = raw_line.strip()
         if not line:
@@ -46,7 +53,12 @@ def consume(lines: Any, rules: list[DetectionRule]) -> int:
             print(f"consume_stream: skipping unparsable line: {exc}", file=sys.stderr)
             continue
 
-        for rule in evaluate_event(event, rules):
+        counters: dict[str, int] = {}
+        if event.kind == "tool":
+            tool_call_counts[event.agent_id] += 1
+            counters["call_count"] = tool_call_counts[event.agent_id]
+
+        for rule in evaluate_event(event, rules, counters=counters):
             triggered_count += 1
             print(
                 f"[{rule.rule_id}] {rule.name} "

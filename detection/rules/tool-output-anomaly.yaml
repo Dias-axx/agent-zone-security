@@ -1,0 +1,6 @@
+rule_id: AGT-INJECT-001
+name: Tool output contains a known prompt-injection marker
+mitre_atlas: "MITRE ATLAS (2026 mapping) - AML.T0051.001 Indirect Prompt Injection"
+owasp_asi: "OWASP Top 10 for Agentic Applications (Dec 2025) - Prompt Injection Propagation"
+severity: medium
+logic: "kind == 'tool_output' and verdict == 'deny'"

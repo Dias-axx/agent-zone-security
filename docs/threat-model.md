@@ -69,17 +69,24 @@ fast and the mapping is expected to age.
   zone enforcement and egress allowlist are all correctly configured.
 - Blast radius is NOT contained if: the delegating user's own IAM scope is itself
   overprivileged (the AND gate only ever narrows, it cannot fix an overprivileged
-  human), or if the egress gateway's TLS blind spot (see Known limitations) is used
+  human), or if the egress gateway's remaining gaps (see Known limitations — CA
+  trust distribution and header-based, non-cryptographic agent identity) are used
   to smuggle data to an allowlisted destination that also accepts attacker traffic.
 
 ## Monitoring gaps (documented, not hidden)
 
-- No TLS payload inspection — the egress gateway sees SNI and destination only.
+- The egress gateway (`deploy/mitmproxy/`) now terminates TLS and enforces the
+  real egress allowlist, but agent identity there is an `X-Agent-Id` header, not
+  a cryptographic credential, and the mitmproxy CA is not yet distributed to
+  agent pods' trust stores automatically — see
+  `docs/adr/0002-tls-terminating-egress-gateway.md`.
 - Behavioural baselines are derived from deterministic mock agents; they are
   synthetic and do not transfer to real workloads without retraining.
-- No tool-output sanitisation — a tool's response can still contain content that
-  influences the next model call, even though its own network/tool actions are
-  contained.
+- Tool-output scanning (`detection/output_scanner.py`) is heuristic pattern
+  matching, not content sanitisation or a prompt-injection filter — a tool's
+  response can still contain content that influences the next model call and
+  evades every pattern this scanner knows about, even though the agent's own
+  network/tool actions stay contained regardless.
 - No multi-agent delegation chain modelling — the AND gate is evaluated one hop
   deep (agent → the human it is delegated from), not across a chain of agents
   delegating to other agents.
@@ -91,9 +98,11 @@ fast and the mapping is expected to age.
 | Default-deny egress with exact/suffix allowlist | Prevention |
 | Zone allow-list (home + reachable) | Prevention |
 | AND-gate intersection for delegated identity | Prevention |
-| Short-lived capability tokens with immediate revocation | Prevention |
-| Append-only audit trail (allows and denies) | Detection support |
+| Short-lived capability tokens with immediate revocation (shared store optional) | Prevention |
+| TLS-terminating egress gateway with real-policy enforcement | Prevention |
+| Append-only audit trail (allows and denies; local file + optional syslog) | Detection support |
 | Declarative detection rules mapped to ATLAS/OWASP ASI | Detection |
+| Tool-output heuristic anomaly scanning | Detection (best-effort) |
 | Response chain: alert → isolate → revoke → preserve → terminate | Response |
 
 See `docs/compliance-mapping.md` for how these controls map to external compliance

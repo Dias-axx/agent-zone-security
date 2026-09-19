@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 
 from control.audit import AuditLog, AuditRecord, now_iso
-from control.policy_engine import Request, Verdict, evaluate
+from control.policy_engine import Request, Verdict, effective_tool_scope, evaluate
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -51,8 +51,13 @@ class MockAgent:
             verdict = evaluate(self.policy, request, delegating_scope=self.delegating_scope)
             verdicts.append(verdict)
             if self.audit_log is not None:
+                # Record the *effective* scope actually applied to this decision, not
+                # the role's raw tool list: for a delegated agent those two differ by
+                # design (see control.policy_engine.effective_tool_scope), and an audit
+                # trail that logged the wider role scope would overstate what the
+                # agent could actually do.
                 scope = (
-                    sorted(self.policy.get("capabilities", {}).get("tools", []))
+                    sorted(effective_tool_scope(self.policy, self.delegating_scope))
                     if action.kind == "tool"
                     else []
                 )

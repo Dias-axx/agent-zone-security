@@ -16,7 +16,18 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"regexp"
 )
+
+// validAgentID matches the kebab-case ids the registry actually issues (e.g.
+// "agt-log-reader-001") and, not coincidentally, exactly the character set
+// Kubernetes allows in a resource name / label value. agentID is interpolated
+// directly into a YAML manifest (isolate) and a label selector (terminate)
+// below, so this is not just cosmetic: an agentID containing YAML metacharacters
+// (":", a newline, ...) would corrupt or inject fields into the manifest
+// handed to `kubectl apply -f -`. Reject anything else before it reaches
+// either call site rather than validating in each one separately.
+var validAgentID = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // Action mirrors control.response.ResponseAction's five values.
 type Action string
@@ -145,6 +156,9 @@ func (c *Controller) Escalate(ctx context.Context, agentID, tokenID, onViolation
 	actions, ok := Chain[onViolation]
 	if !ok {
 		return nil, fmt.Errorf("unknown response.on_violation value %q", onViolation)
+	}
+	if !validAgentID.MatchString(agentID) {
+		return nil, fmt.Errorf("invalid agent id %q: must match %s", agentID, validAgentID.String())
 	}
 
 	events := make([]Event, 0, len(actions))

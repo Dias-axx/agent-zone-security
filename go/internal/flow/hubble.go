@@ -40,13 +40,20 @@ const agentIDLabelKey = "agent_id="
 
 // agentIDFromLabels looks for an "agent_id=<value>" label, matching how Cilium
 // surfaces Kubernetes pod labels as strings in a flow's endpoint — typically
-// prefixed with their source, e.g. "k8s:agent_id=agt-log-reader-001", so this
-// matches on the "agent_id=" key appearing anywhere in the label rather than
-// requiring it at position zero.
+// prefixed with their source, e.g. "k8s:agent_id=agt-log-reader-001". The key
+// must match exactly (after stripping an optional "<source>:" prefix), not
+// merely appear as a substring: a label such as "k8s:parent_agent_id=x" also
+// contains "agent_id=" as a substring, and matching on that would misattribute
+// the flow to whatever value follows a differently-keyed label instead of the
+// real agent_id one (or none at all).
 func agentIDFromLabels(labels []string) string {
 	for _, label := range labels {
-		if idx := strings.Index(label, agentIDLabelKey); idx != -1 {
-			return label[idx+len(agentIDLabelKey):]
+		key := label
+		if idx := strings.LastIndex(key, ":"); idx != -1 {
+			key = key[idx+1:]
+		}
+		if value, ok := strings.CutPrefix(key, agentIDLabelKey); ok {
+			return value
 		}
 	}
 	return "unknown"

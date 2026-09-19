@@ -106,6 +106,8 @@ Escalation level is configured per agent role via `response.on_violation`, not g
 | AND-gate delegated identity | Excessive Agency / Privilege Abuse | Lateral movement via agent tooling |
 | Secret-store access control | Sensitive Information Disclosure | AML.T0024 Exfiltration via ML Inference API |
 | Volume-based detection | Resource Exhaustion / Denial of Wallet | AML.T0034 Cost Harvesting |
+| Tool-output anomaly scanning (heuristic, not preventive) | Prompt Injection Propagation | AML.T0051.001 Indirect Prompt Injection |
+| TLS-terminating egress gateway with real-policy enforcement | Tool Misuse | AML.T0025 Exfiltration via Cyber Means |
 | Immutable audit trail with `delegated_by` | Lack of auditability | — |
 
 Framework references are dated deliberately — this field moved substantially during 2026 and the
@@ -118,12 +120,15 @@ mapping is expected to age.
 ```
 registry/      agent inventory: owner, role, autonomy level, review date
 policy/        capability schema + example role policies (read-only, deploy, RAG)
-control/       policy engine, registry validator, token issuer, audit log, response chain
-detection/     event normalisation + declarative rule engine, ATLAS/ASI-mapped rules
+control/       policy engine, registry validator, token issuer (+ optional Redis revocation
+               backend), audit log (+ pluggable sinks), response chain
+detection/     event normalisation, declarative rule engine, tool-output heuristic scanner,
+               ATLAS/ASI-mapped rules
 agents/        deterministic mock agents (log_reader, deploy_assistant) + optional LLM adapter
 poc/           reproducible attack/containment scenarios, each returns a process exit code
 tests/         pytest suite covering every deny path and the AND-gate
-deploy/        k3d/Cilium cluster config and Kubernetes manifests (zones, default-deny, egress gateway, Kyverno)
+deploy/        k3d/Cilium cluster config, Kubernetes manifests (zones, default-deny, Kyverno),
+               and the mitmproxy-based TLS-terminating egress gateway (deploy/mitmproxy/)
 go/            flow consumer, response controller, admission webhook (Go, no external dependencies)
 docs/          threat model, architecture notes, compliance mapping, ADRs
 ```
@@ -188,26 +193,53 @@ These targets do what was actually run while building this repo, up to a point:
 `cluster-up` succeeds (cluster creates, Cilium's Helm chart installs cleanly), but
 in that build environment no pod — Cilium's own DaemonSet included — ever reached
 `Running`, so `deploy` and `poc-cluster` were never confirmed. See
-`docs/architecture.md` for the exact failure and the diagnosis performed. Run
-these on real infrastructure (a VM, bare metal, or a CI runner with full
+`docs/architecture.md` for the exact failure and the diagnosis performed, and
+`docs/live-verification-runbook.md` for a step-by-step guide (prerequisites,
+checkpoints, what the real output should look like) to running this on
+infrastructure that doesn't have that limitation. Run these on real infrastructure
+(a VM, bare metal, or a CI runner with full
 nested-container support) to get the actual proof.
 
 ## Known limitations
 
-- **No TLS inspection.** The egress gateway design (Phase 2, not yet built) sees SNI and destination
-  only, not payload. This is a deliberate scope decision, not an oversight — see
-  `docs/adr/0001-cilium-over-calico.md`.
-- **No tool-output sanitisation.** A tool's response can still influence the next model call even
-  though the agent's own network and tool actions are contained. This project's threat model assumes
-  injection succeeds; it does not filter it (see Non-goals).
+- **TLS inspection: real gateway, built and run standalone, not yet run in-cluster.**
+  `deploy/k8s/30-egress-gateway.yaml` deploys a mitmproxy-based TLS-terminating forward proxy
+  (`deploy/mitmproxy/`) enforcing the same `evaluate_egress()` every other layer uses. The image was
+  built and run as a standalone container in this repo's build session — real proxied requests through
+  it produced real allow/deny decisions and an actual "Connection killed" for a denied destination (see
+  `docs/adr/0002-tls-terminating-egress-gateway.md` for the captured output). What that run does **not**
+  cover: deployment into the k3d/Cilium cluster from Phase 2 (still blocked, see `docs/architecture.md`),
+  CA trust distribution to real agent pods, and agent identity is an `X-Agent-Id` header, not mTLS —
+  both named as follow-ups in the ADR, not hidden.
+- **Tool-output "sanitisation" is heuristic detection, not prevention.** `detection/output_scanner.py`
+  flags known injection-marker patterns in tool output and feeds `AGT-INJECT-001` into the same
+  detection pipeline as every other signal (`poc/scenario_tool_output_anomaly.py`). This does **not**
+  reverse the threat model's core assumption that injection can succeed (see Non-goals) — it is a
+  best-effort additional signal with real false-negative and false-positive rates, not a filter anyone
+  should rely on to stop an injection from working. The containment controls (policy engine, egress
+  allowlist, zone enforcement) remain the actual defense; this only helps notice sooner.
 - **Synthetic behavioural baselines.** Detection thresholds (e.g. the denial-of-wallet call-count rule)
   are illustrative and derived from deterministic mock agents. They will not transfer to real
   workloads without retraining against real traffic.
 - **No multi-agent delegation chains.** The AND gate is evaluated one hop deep (agent → the human it
   is delegated from). An agent delegating to another agent is not modelled.
-- **Single-process token revocation and audit log.** `TokenIssuer` revocation state and the JSONL
-  audit log both live in a single process/file in this reference implementation. A production
-  deployment needs a shared revocation store and a real log pipeline.
+- **`data_scope` (per-collection access) is declared but not enforced.** `policy/examples/rag-agent.yaml`
+  declares `hr-confidential: access: none`, but `control/policy_engine.py`'s `evaluate_tool` only checks
+  the tool name (`docstore.query`) against the role's scope — it never reads `data_scope`, so a role with
+  `docstore.query` can query any collection regardless of what `data_scope` says. Enforcing this properly
+  needs a resource/collection field threaded through `Request`, every call site, and the mock agents —
+  a design decision, not a local fix, so it is named here rather than half-implemented. Found in review;
+  left open deliberately.
+- **Token revocation and audit log are pluggable now, but default to single-process/single-file.**
+  `control/token_issuer.py`'s `TokenIssuer` accepts a `RevocationStore` (default:
+  `InMemoryRevocationStore`, still single-process; optional `RedisRevocationStore` in
+  `control/revocation_backends.py`, import-guarded, shares revocation state across processes/replicas —
+  requires a Redis instance this repo does not provision) and a shared `secret` (default: still a fresh
+  random secret per instance, so multiple processes can't verify each other's tokens unless a shared
+  secret is explicitly passed in — secret distribution is a deployment concern this module deliberately
+  does not solve). `control/audit.py`'s `AuditLog` now dispatches to multiple `AuditSink`s
+  (`JSONLFileSink` always, plus optional `SyslogSink` for a SIEM). None of this has been run against a
+  real Redis or syslog collector — unit-tested against fakes only.
 - **No live cluster wiring yet.** The response chain's `isolate`/`terminate` actions are dry-run only;
   the detection engine evaluates rules against synthetic events, not a running Cilium/OTel/Vault
   pipeline. See [Phase status](#phase-status).

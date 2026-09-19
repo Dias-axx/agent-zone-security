@@ -44,6 +44,20 @@ func TestParseHubbleLineForwardedAllowed(t *testing.T) {
 	}
 }
 
+func TestParseHubbleLineDoesNotMatchDifferentlyKeyedLabel(t *testing.T) {
+	// "parent_agent_id=" contains "agent_id=" as a substring; agentIDFromLabels
+	// must not treat that as a match for the "agent_id" key.
+	line := []byte(`{"flow":{"verdict":"DROPPED","source":{"namespace":"agent-restricted","labels":["k8s:parent_agent_id=decoy","k8s:agent_id=agt-real-001"]},"destination":{"namespace":"corp-prod"}}}`)
+
+	event, err := ParseHubbleLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if event.AgentID != "agt-real-001" {
+		t.Errorf("agent_id = %q, want agt-real-001 (must not match the parent_agent_id decoy label)", event.AgentID)
+	}
+}
+
 func TestParseHubbleLineMalformedJSON(t *testing.T) {
 	if _, err := ParseHubbleLine([]byte("not json")); err == nil {
 		t.Fatal("expected an error for malformed JSON, got nil")
