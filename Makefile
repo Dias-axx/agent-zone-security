@@ -1,5 +1,6 @@
 .PHONY: validate lint typecheck test poc poc-pipeline cluster-up cluster-down deploy \
-	poc-cluster egress-gateway-image egress-gateway-image-import go-fmt go-vet go-lint go-test go-build go-check
+	poc-cluster egress-gateway-image egress-gateway-image-import activity-api \
+	go-fmt go-vet go-lint go-test go-build go-check
 
 validate:
 	python -m control.validate
@@ -12,6 +13,15 @@ typecheck:
 
 test:
 	pytest
+
+# Local read-only GUI/API over the audit log (control/audit.py). Point
+# AUDIT_LOG at the same path your AuditLog(path) instance writes to (defaults
+# to audit.jsonl in the repo root, matching no real default — set it
+# explicitly for anything beyond a quick local look).
+AUDIT_LOG ?= audit.jsonl
+
+activity-api:
+	python -m control.activity_api --audit-log $(AUDIT_LOG)
 
 poc:
 	python -m poc.scenario_egress

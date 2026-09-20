@@ -169,6 +169,28 @@ python -m poc.scenario_secret_harvest    # secret-store access + exfiltration co
 python -m poc.scenario_denial_of_wallet  # high-volume tool calls flagged, response chain escalated
 ```
 
+### Activity dashboard / API
+
+A local, read-only GUI and JSON API over the audit log (`control/audit.py`) —
+per-agent activity, decision counts (allow/deny/confirm), and a filterable
+recent-events table. Stdlib-only (`http.server`), no CDN, no external
+dependency:
+
+```bash
+make activity-api AUDIT_LOG=path/to/audit.jsonl   # or: python -m control.activity_api --audit-log path/to/audit.jsonl
+```
+
+Then open `http://127.0.0.1:8090/`. The same data is available as JSON at
+`GET /api/agents` (per-agent summary) and `GET /api/activity` (filterable by
+`agent_id`, `decision`, `kind`, `since`, `limit`). Verified end to end:
+started the server against a real `AuditLog`-written file, hit both
+endpoints and the dashboard root with real HTTP requests, and confirmed the
+JSON matched the records actually written (`tests/test_activity_api.py`,
+`tests/test_activity_reader.py`).
+
+No authentication and binds to `127.0.0.1` by default — a local operator
+visibility tool, not a hardened multi-tenant service (see Known limitations).
+
 ### Go components
 
 ```bash
@@ -255,6 +277,15 @@ Windows-specific `host.docker.internal` kubeconfig fix.
   streams. It is explicitly a best-effort, non-durable convenience view (matching the monitor's own
   stance and its lack of authentication) — never a replacement for `JSONLFileSink`/`SyslogSink`, and a
   forwarding failure is swallowed and logged to stderr, never raised into the policy-evaluation path.
+- **The activity dashboard/API (`control/activity_api.py`) is a local, unauthenticated visibility tool,
+  not a hardened service.** It reads whatever `JSONLFileSink` file it's pointed at and has no auth, no
+  TLS, and no rate limiting — binding it to anything beyond `127.0.0.1` needs a real authenticating
+  reverse proxy in front of it, which this repo does not provide. It is a separate, complementary path
+  to `CodingAgentMonitorSink` above: this one is self-contained (reads a local file, no external service
+  required), the sink forwards live into an already-running Coding-Agent-Monitor instance — use whichever
+  (or both) fits your setup. Verified against real recorded activity (`tests/test_activity_api.py`,
+  `tests/test_activity_reader.py`, and a manual run against a real `AuditLog`-written file), not
+  synthetic/mocked HTTP responses.
 - **The response chain's `isolate`/`terminate` actions are still dry-run only in every call site in
   this repo** — no code path has flipped `dry_run=False` against a live cluster. OTel/Vault ingestion
   into the detection engine is also not wired.

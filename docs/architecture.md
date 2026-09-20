@@ -58,6 +58,32 @@ three extra sinks/stores are explicitly secondary: `JSONLFileSink` (or a real SI
 pipeline) stays the source of truth, since Coding-Agent-Monitor is itself
 best-effort, in-memory and unauthenticated by its own design.
 
+### Activity dashboard / API (`control/activity_api.py`, `control/activity_reader.py`)
+
+A local, read-only view over the same `JSONLFileSink` file `AuditLog` already
+writes: `control/activity_reader.py` holds pure read/filter/aggregate
+functions (no I/O beyond reading the file), and `control/activity_api.py`
+wraps them in a stdlib `http.server` (no framework dependency, matching
+`control/policy_engine.py`'s zero-dependency stance) that serves `GET
+/api/agents` (per-agent decision counts and last-seen), `GET /api/activity`
+(filterable by `agent_id`, `decision`, `kind`, `since`, `limit`), and a single
+embedded HTML dashboard at `/` (auto-refreshing table, no CDN or external
+script). It is a second, independent path to the same audit data
+`CodingAgentMonitorSink` above forwards live to an external monitor — this
+one reads the local file directly and needs no other service running.
+
+**Status**: verified end to end. `tests/test_activity_reader.py` covers the
+pure functions (malformed-line tolerance, filtering, aggregation) directly.
+`tests/test_activity_api.py` starts a real server on an ephemeral localhost
+port, writes real records through an actual `AuditLog`, and asserts the
+HTTP responses (`/`, `/api/agents`, `/api/activity`, unfiltered and
+filtered, plus a 404 for an unknown path) match what was actually written —
+not mocked. A manual run (`python -m control.activity_api --audit-log
+...`) against a real audit file confirmed the same via `curl` and produced
+correctly aggregated JSON. No authentication; binds to `127.0.0.1` by
+default — a local operator tool, not a hardened service (see README's Known
+limitations).
+
 ### Response Chain (`control/response.py`)
 
 `alert → isolate → revoke → preserve → terminate`, in that fixed order. All
