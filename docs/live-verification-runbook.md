@@ -11,11 +11,19 @@ failed: ... can't get final child's PID from pipe: EOF`) once containerd,
 not a bare `runc run`, drives it — that turned out to be specific to that
 sandbox, not the k3d/Cilium configuration.
 
-Not yet exercised live in that run: the `egress-gateway` pod (its image
-isn't built/pushed, so it stays `ImagePullBackOff`), the Kyverno admission
-policies, and the Go `response-controller`/`admission-webhook` against a
-real API server. This runbook remains the reference for doing those, and
-for reproducing the confirmed parts yourself.
+**Update 2: the egress gateway is also confirmed** — built with
+`make egress-gateway-image-import` (`k3d image import`, no registry needed)
+and deployed via `deploy/k8s/30-egress-gateway.yaml` into the same cluster.
+A real request from `agent-probe` through the in-cluster gateway with a
+valid `X-Agent-Id` header produced `verdict: allow` for its allowed
+destination and `verdict: deny` for a disallowed one, plus a fail-closed
+`deny` with no header at all — see
+`docs/adr/0002-tls-terminating-egress-gateway.md` for the captured output.
+
+Not yet exercised live: the Kyverno admission policies, and the Go
+`response-controller`/`admission-webhook` against a real API server. This
+runbook remains the reference for doing those, and for reproducing the
+confirmed parts yourself.
 
 ---
 

@@ -66,9 +66,10 @@ enforcement, egress control, per-agent identity and behavioural detection into o
 
 The Tool Broker and Egress Gateway both call into the same policy decision point
 (`control/policy_engine.py`) today. The Cilium `NetworkPolicy` zone enforcement
-shown in the diagram is confirmed running on real infrastructure (see
-[Phase status](#phase-status) and `docs/architecture.md`); the egress-gateway pod
-itself is not yet exercised live (its image isn't built/pushed).
+and the mitmproxy-based egress-gateway pod are both confirmed running on real
+infrastructure, including real allow/deny decisions through the in-cluster
+gateway (see [Phase status](#phase-status), `docs/architecture.md`, and
+`docs/adr/0002-tls-terminating-egress-gateway.md`).
 
 ## Control layers
 
@@ -139,7 +140,7 @@ docs/          threat model, architecture notes, compliance mapping, ADRs
 |---|---|---|
 | 1 | Registry, policy schema + examples, policy engine, mock agents | done |
 | 1.5 | Token issuer, audit log, response chain, pytest suite, CI | done |
-| 2 | k3d + Cilium, zone isolation, egress gateway, admission control | **core acceptance criterion confirmed live** (Docker Desktop/Windows): cross-zone attempt → real `DROPPED` Hubble flow. Egress gateway and admission control not yet exercised live — see `docs/architecture.md` |
+| 2 | k3d + Cilium, zone isolation, egress gateway, admission control | **core acceptance criterion and egress gateway confirmed live** (Docker Desktop/Windows): cross-zone attempt → real `DROPPED` Hubble flow; real allow/deny requests through the in-cluster egress gateway. Kyverno admission control not yet exercised live — see `docs/architecture.md` |
 | 3 | Detection engine + Go flow-consumer: `AGT-ZONE-001` confirmed firing against a real captured Hubble flow through the actual Go→Python pipeline, not just synthetic JSON (`make poc-pipeline`); live OTel/Vault ingestion still not wired | partial |
 | 4 | Compliance mapping (EU AI Act, DORA, ISO 42001, NIST AI RMF, BAIT/MaRisk) | documented, honestly marked partial/documented-only — see `docs/compliance-mapping.md` |
 | 6 | Go: flow consumer, response controller, admission webhook — `flow-consumer`'s Hubble parsing confirmed against a real captured flow (one label-key bug found and fixed); `response-controller`/`admission-webhook` still only unit-tested against mocks, never run against a live API server | partial |
@@ -196,22 +197,27 @@ showed the real `DROPPED` flow with `AGT-ZONE-001` firing against it — see
 `docs/architecture.md` for the captured output. This repo's own build sandbox hit an
 unrelated containerd/runc limitation blocking all pod scheduling (preserved in
 `docs/architecture.md` for reference); it turned out to be specific to that sandbox,
-not the k3d/Cilium configuration. Not yet exercised live: the `egress-gateway` pod
-(its image isn't built/pushed, so it stays `ImagePullBackOff`) and the Kyverno
-admission policies. See `docs/live-verification-runbook.md` for the full step-by-step
-guide, including the Windows-specific `host.docker.internal` kubeconfig fix.
+not the k3d/Cilium configuration. The egress-gateway pod has since been built and
+deployed into this same cluster (`make egress-gateway-image-import` — no registry
+needed) with real allow/deny requests confirmed through it; Kyverno admission
+policies are the one remaining piece not yet exercised live. See
+`docs/live-verification-runbook.md` for the full step-by-step guide, including the
+Windows-specific `host.docker.internal` kubeconfig fix.
 
 ## Known limitations
 
-- **TLS inspection: real gateway, built and run standalone, not yet run in-cluster.**
+- **TLS inspection: real gateway, confirmed running in-cluster with real allow/deny
+  decisions; full TLS interception and CA trust distribution still not exercised.**
   `deploy/k8s/30-egress-gateway.yaml` deploys a mitmproxy-based TLS-terminating forward proxy
-  (`deploy/mitmproxy/`) enforcing the same `evaluate_egress()` every other layer uses. The image was
-  built and run as a standalone container in this repo's build session — real proxied requests through
-  it produced real allow/deny decisions and an actual "Connection killed" for a denied destination (see
-  `docs/adr/0002-tls-terminating-egress-gateway.md` for the captured output). What that run does **not**
-  cover: deployment into the k3d/Cilium cluster from Phase 2 (still blocked, see `docs/architecture.md`),
-  CA trust distribution to real agent pods, and agent identity is an `X-Agent-Id` header, not mTLS —
-  both named as follow-ups in the ADR, not hidden.
+  (`deploy/mitmproxy/`) enforcing the same `evaluate_egress()` every other layer uses. Built and
+  run standalone first, then deployed into the live k3d/Cilium cluster from Phase 2 (`k3d image
+  import`, no registry needed): a real request from the actual `agent-probe` pod through the
+  in-cluster gateway produced the same real allow/deny decisions as the standalone run, reachable
+  only from `agent-restricted`/`deploy-staging` by `NetworkPolicy` as designed (see
+  `docs/adr/0002-tls-terminating-egress-gateway.md` for the captured output). What this does **not**
+  cover: TLS interception of an actual HTTPS request end to end, automated CA trust distribution to
+  real agent pods, and agent identity is an `X-Agent-Id` header, not mTLS — both named as
+  follow-ups in the ADR, not hidden.
 - **Tool-output "sanitisation" is heuristic detection, not prevention.** `detection/output_scanner.py`
   flags known injection-marker patterns in tool output and feeds `AGT-INJECT-001` into the same
   detection pipeline as every other signal (`poc/scenario_tool_output_anomaly.py`). This does **not**
@@ -252,13 +258,15 @@ guide, including the Windows-specific `host.docker.internal` kubeconfig fix.
 - **The response chain's `isolate`/`terminate` actions are still dry-run only in every call site in
   this repo** — no code path has flipped `dry_run=False` against a live cluster. OTel/Vault ingestion
   into the detection engine is also not wired.
-- **Cluster core containment confirmed live; egress gateway and admission control are not.**
+- **Cluster core containment and egress gateway confirmed live; Kyverno admission control is not.**
   `deploy/k3d/cluster.yaml` and `deploy/k8s/*.yaml` were run end to end on real infrastructure (Docker
   Desktop, Windows): every pod including Cilium's DaemonSet reached `Running`, a cross-zone connection
   attempt genuinely timed out, and `hubble observe` showed the real `DROPPED` flow — see
-  `docs/architecture.md` for the captured output. The `egress-gateway` pod itself stayed
-  `ImagePullBackOff` in that same run (image never built/pushed, see the mitmproxy limitation above),
-  so egress-gateway reachability and the Kyverno admission policies were not exercised live.
+  `docs/architecture.md` for the captured output. The `egress-gateway` pod, initially stuck in
+  `ImagePullBackOff` for lack of a pushed image, was then built and loaded into the same cluster with
+  `k3d image import` (no registry needed) and confirmed enforcing real allow/deny decisions from the
+  actual `agent-probe` pod (see the mitmproxy limitation above). The Kyverno admission policies remain
+  the one piece of Phase 2 not yet exercised live.
 - **Go components: `flow-consumer`'s Hubble parsing is now confirmed against a real captured flow**
   (`TestParseHubbleLineRealCapturedFlow`) — one real bug found this way and fixed: `hubble.go` was
   matching on `agent_id=` while `internal/response/controller.go`'s `isolate()`/`terminate()` already

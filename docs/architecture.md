@@ -134,17 +134,20 @@ by an `X-Agent-Id` request header. See
 `docs/adr/0002-tls-terminating-egress-gateway.md` for why mitmproxy over
 Envoy and the named follow-ups (mTLS agent identity, CA trust distribution).
 
-**Status**: `evaluate_request()` is unit-tested directly
-(`tests/test_mitmproxy_addon.py`). The image (`deploy/mitmproxy/Dockerfile`)
-was built and run as a standalone container in this repo's build session —
-real proxied HTTP requests through the running mitmproxy process produced
-real allow/deny decisions (captured in the ADR), including a fail-closed
-deny for an unrecognised agent id and an actual killed connection for a
-denied destination. Building it caught a real bug (PyYAML isn't bundled in
-the mitmproxy base image), fixed in the Dockerfile. Not yet done: deploying
-it into the k3d/Cilium cluster from Phase 2 (still blocked — see below) to
-confirm the NetworkPolicy-restricted reachability and Hubble/audit-log
-integration end to end.
+**Status: confirmed live in-cluster.** `evaluate_request()` is unit-tested
+directly (`tests/test_mitmproxy_addon.py`), and beyond the earlier
+standalone-container run (real allow/deny decisions, a fail-closed deny for
+an unrecognised agent id, a real bug caught — PyYAML not bundled in the base
+image, fixed in the Dockerfile — full detail in the ADR), the built image was
+loaded into the live k3d/Cilium cluster with `k3d image import` (no registry
+needed) and deployed via `deploy/k8s/30-egress-gateway.yaml`, reachable only
+from `agent-restricted`/`deploy-staging` by `NetworkPolicy` as designed. A
+real proxied request from the actual `agent-probe` pod through the in-cluster
+gateway produced the exact same allow/deny/fail-closed decisions as the
+standalone run — see `docs/adr/0002-tls-terminating-egress-gateway.md` for
+the captured output. Not yet done: TLS interception of an actual HTTPS
+request end to end, and automated CA trust distribution to agent pods (both
+named follow-ups in the ADR).
 
 ### Cluster (`deploy/`)
 
@@ -224,10 +227,10 @@ Two real bugs surfaced by this run, both fixed:
    shape (`TestParseHubbleLineRealCapturedFlow`).
 
 **What was NOT exercised in this run**: the `egress-gateway` pod stayed
-`ImagePullBackOff` (its image was never built/pushed — see
-`docs/adr/0002-tls-terminating-egress-gateway.md`), so the egress-gateway
-reachability and audit-log-integration parts of `poc/scenario_zone_cluster.sh`
-were not run; only the core zone-containment assertion was. The Go
+`ImagePullBackOff` at the time (its image had not yet been built/imported),
+so only the core zone-containment assertion ran. That gap has since been
+closed in a follow-up session on the same cluster — see the "Egress gateway"
+section above and the ADR for the real in-cluster allow/deny output. The Go
 `response-controller`/`admission-webhook` were still not run against this
 live API server either — see "Go components" above.
 
