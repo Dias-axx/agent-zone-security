@@ -109,13 +109,23 @@ kubectl get events -n kube-system --sort-by=.lastTimestamp | tail -20
 
 ## 5. Deploy the zones and test fixtures
 
+Build the egress-gateway image and load it into the k3d cluster's nodes
+first — there's no registry, so `k3d image import` replaces a push (the
+manifest already points at this local tag with `imagePullPolicy:
+IfNotPresent`):
+
 ```bash
+make egress-gateway-image-import   # requires k3d and docker; runs the docker build then k3d image import
 make deploy
 kubectl get pods -n agent-restricted -n corp-prod -n egress-gateway
 ```
 
 Expected: `agent-probe` (agent-restricted), `corp-prod-target`
-(corp-prod), and the `egress-gateway` deployment's pod all `Running`.
+(corp-prod), and the `egress-gateway` deployment's pod all `Running`. If
+`egress-gateway` still shows `ImagePullBackOff`/`ErrImagePull` after this,
+confirm the image import actually targeted the right cluster name
+(`k3d cluster list`) and that `K3D_CLUSTER_NAME` in the Makefile matches
+it.
 
 Kyverno policies (`deploy/k8s/50-kyverno-pod-hardening.yaml`) need the
 Kyverno controller installed separately — not required for the containment

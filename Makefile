@@ -1,5 +1,5 @@
 .PHONY: validate lint typecheck test poc poc-pipeline cluster-up cluster-down deploy \
-	poc-cluster egress-gateway-image go-fmt go-vet go-lint go-test go-build go-check
+	poc-cluster egress-gateway-image egress-gateway-image-import go-fmt go-vet go-lint go-test go-build go-check
 
 validate:
 	python -m control.validate
@@ -86,11 +86,19 @@ poc-cluster:
 	./poc/scenario_zone_cluster.sh
 
 # Builds the TLS-terminating egress gateway image (mitmproxy + this repo's own
-# policy engine, see deploy/mitmproxy/). Push it and update the `image:` field
-# in deploy/k8s/30-egress-gateway.yaml before `make deploy`. Built and run
-# standalone (not yet in-cluster) in this repo's build session with real
-# allow/deny output captured — see docs/adr/0002-tls-terminating-egress-gateway.md.
+# policy engine, see deploy/mitmproxy/). deploy/k8s/30-egress-gateway.yaml
+# already points at this exact local tag with imagePullPolicy: IfNotPresent,
+# so for a k3d cluster `make egress-gateway-image-import` (below) is enough —
+# no registry push needed. Built and run standalone (not yet in-cluster) in
+# this repo's build session with real allow/deny output captured — see
+# docs/adr/0002-tls-terminating-egress-gateway.md.
 EGRESS_GATEWAY_IMAGE := agent-zone-control-egress-gateway:latest
+K3D_CLUSTER_NAME := agent-zone-control
 
 egress-gateway-image:
 	docker build -f deploy/mitmproxy/Dockerfile -t $(EGRESS_GATEWAY_IMAGE) .
+
+# Loads the built image directly into the k3d cluster's node containers, so
+# `make deploy` can run it without a registry.
+egress-gateway-image-import: egress-gateway-image
+	k3d image import $(EGRESS_GATEWAY_IMAGE) -c $(K3D_CLUSTER_NAME)

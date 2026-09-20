@@ -5,10 +5,14 @@
 # control/policy_engine.py's evaluate_egress, not a reimplementation — see
 # deploy/mitmproxy/policy_addon.py and docs/adr/0002-tls-terminating-egress-gateway.md.
 #
-# Build and push deploy/mitmproxy/Dockerfile before applying this manifest;
-# replace `image:` below with wherever you pushed it. This has not been
-# deployed against a live cluster — see docs/architecture.md and
-# docs/live-verification-runbook.md.
+# Build deploy/mitmproxy/Dockerfile (`make egress-gateway-image`) before
+# applying this manifest. For a k3d cluster with no registry, import the
+# built image directly into the cluster's nodes instead of pushing it:
+#   k3d image import agent-zone-control-egress-gateway:latest -c <cluster-name>
+# then keep `image:` below pointed at that local tag (imagePullPolicy:
+# IfNotPresent makes k3d use the imported image instead of trying to pull).
+# If you push to a real registry instead, replace `image:` accordingly and
+# drop the pull policy override.
 #
 # Known limitation even once live: the mitmproxy CA is generated on first
 # container start into an emptyDir, so it rotates on every pod restart.
@@ -40,7 +44,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: egress-gateway
-          image: ghcr.io/dias-axx/agent-zone-control-egress-gateway:latest # nach `make egress-gateway-image` ersetzen
+          image: agent-zone-control-egress-gateway:latest # matches EGRESS_GATEWAY_IMAGE in Makefile; retag for a real registry if pushing
+          imagePullPolicy: IfNotPresent # required for a k3d-imported local image; ":latest" otherwise defaults to Always and re-pulls
           ports:
             - containerPort: 8080
           securityContext:
