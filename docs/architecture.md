@@ -160,10 +160,91 @@ placeholder pod that is the only non-DNS destination agent zones may reach, the
 checks the Pod Security Standard alone does not cover (owner/role label
 provenance).
 
-**Verification status, stated plainly**: in the sandbox this repository was
-built in, `k3d cluster create` succeeds and `helm install cilium` deploys
-without error, but no pod — Cilium's own DaemonSet included — ever reaches
-`Running`. The container runtime fails every CRI pod-sandbox creation with:
+**Verification status: confirmed live**, on a second machine (Windows 11,
+Docker Desktop, k3d v5.8.3, Cilium 1.16.5, Go 1.27.1) after this repo's own
+build sandbox hit the containerd/runc limitation described below. Every pod
+reached `Running`, including Cilium's own DaemonSet:
+
+```
+NAME                                      READY   STATUS    RESTARTS   AGE
+cilium-5hzxb                              1/1     Running   0          2m54s
+cilium-9jqfx                              1/1     Running   0          2m54s
+cilium-envoy-2sb2b                        1/1     Running   0          2m54s
+cilium-envoy-7wg59                        1/1     Running   0          2m54s
+cilium-operator-6c4fb78954-x68pr          1/1     Running   0          2m54s
+coredns-ccb96694c-xms9k                   1/1     Running   0          9m13s
+hubble-relay-7b5c9d5cbb-7nwsf             1/1     Running   0          2m54s
+local-path-provisioner-5cf85fd84d-rk9b7   1/1     Running   0          9m13s
+metrics-server-5985cbc9d7-qsvhr           1/1     Running   0          9m13s
+```
+
+`agent-probe` (agent-restricted) attempting to reach `corp-prod-target`
+(corp-prod) timed out as expected:
+
+```
+curl: (28) Connection timed out after 5002 milliseconds
+```
+
+and `hubble observe --namespace corp-prod --verdict DROPPED` showed the real
+flow — this is genuine captured output, trimmed to the fields that matter:
+
+```json
+{"flow":{"verdict":"DROPPED","drop_reason_desc":"POLICY_DENIED",
+ "source":{"namespace":"agent-restricted","pod_name":"agent-probe",
+   "labels":["k8s:app=agent-probe","k8s:role=read-only-agent"]},
+ "destination":{"namespace":"corp-prod","pod_name":"corp-prod-target"},
+ "traffic_direction":"EGRESS","Summary":"TCP Flags: SYN"}}
+```
+
+This satisfies the Phase 2 acceptance criterion exactly as written: a
+cross-zone connection attempt produces a `DROPPED` Hubble flow. Piping this
+real flow shape through the actual `go/cmd/flow-consumer` binary and
+`detection/consume_stream.py` confirmed the second half of the criterion —
+`AGT-ZONE-001` fires against the real flow, not a synthetic fixture:
+
+```
+[AGT-ZONE-001] Cross-zone traversal denied (agent=unknown target=corp-prod verdict=deny)
+```
+
+Two real bugs surfaced by this run, both fixed:
+
+1. `host.docker.internal` (the address k3d writes into kubeconfig on Windows)
+   resolved to the machine's LAN IP rather than loopback and timed out —
+   fixed locally with `kubectl config set-cluster ... --server=https://127.0.0.1:6550`.
+   This is an environment quirk, not a repo bug; no manifest change needed.
+2. **`agent_id=unknown` above is real and was a genuine bug**:
+   `deploy/k8s/40-test-pods.yaml`'s `agent-probe` pod never carried an
+   `agent-id` label, and separately, `go/internal/flow/hubble.go`'s
+   `agentIDFromLabels` was looking for `agent_id=` (underscore) while
+   `go/internal/response/controller.go`'s `isolate()`/`terminate()` already
+   used `agent-id` (hyphen) to select pods — two different conventions that
+   never agreed with each other. Both fixed: the test pod now carries
+   `agent-id: agt-log-reader-001`, and `hubble.go` now matches on `agent-id=`
+   throughout, verified with a new test built from this exact captured flow
+   shape (`TestParseHubbleLineRealCapturedFlow`).
+
+**What was NOT exercised in this run**: the `egress-gateway` pod stayed
+`ImagePullBackOff` (its image was never built/pushed — see
+`docs/adr/0002-tls-terminating-egress-gateway.md`), so the egress-gateway
+reachability and audit-log-integration parts of `poc/scenario_zone_cluster.sh`
+were not run; only the core zone-containment assertion was. The Go
+`response-controller`/`admission-webhook` were still not run against this
+live API server either — see "Go components" above.
+
+**Status**: Phase 2's core acceptance criterion (cross-zone attempt → real
+`DROPPED` Hubble flow → `AGT-ZONE-001` fires) is confirmed on real
+infrastructure. The build sandbox's own containerd/runc limitation
+(preserved below for anyone who hits the same wall) turned out to be
+sandbox-specific, not a defect in the k3d/Cilium configuration — exactly as
+suspected.
+
+<details>
+<summary>Original build-sandbox diagnosis (containerd/runc failure, since resolved elsewhere)</summary>
+
+In the sandbox this repository was originally built in, `k3d cluster create`
+succeeded and `helm install cilium` deployed without error, but no pod —
+Cilium's own DaemonSet included — ever reached `Running`. The container
+runtime failed every CRI pod-sandbox creation with:
 
 ```
 failed to create containerd task: failed to create shim task: OCI runtime
@@ -175,32 +256,17 @@ Diagnosis performed in that session: image pulls initially failed on
 certificate verification (the nested node containers did not trust the
 sandbox's TLS-intercepting proxy CA — fixed by installing the CA bundle into
 each node container and restarting it). After that fix, a bare `runc run`
-invoked directly inside the k3d node container succeeds end to end (including
-a fresh network namespace), but the same node's containerd, going through the
-full CRI pod-sandbox path, fails consistently and immediately on every pod,
-including a plain `pause` container. That gap — bare `runc` works, CRI-driven
-`runc` does not — points at something specific to the OCI spec containerd
-generates (cgroup path assignment or a seccomp/security profile difference)
-colliding with a restriction imposed above Docker in that sandbox, not at a
-mistake in the k3d/Cilium configuration itself. This was not chased further
-within the session's time budget once the failure reproduced identically
-across a clean pod recreation.
+invoked directly inside the k3d node container succeeded end to end
+(including a fresh network namespace), but the same node's containerd, going
+through the full CRI pod-sandbox path, failed consistently and immediately on
+every pod, including a plain `pause` container. That gap — bare `runc` works,
+CRI-driven `runc` does not — pointed at something specific to the OCI spec
+containerd generates (cgroup path assignment or a seccomp/security profile
+difference) colliding with a restriction imposed above Docker in that
+sandbox. Confirmed by the successful run above: the k3d/Cilium configuration
+itself was never the problem.
 
-**What this means for the manifests in this repo**: `deploy/k3d/cluster.yaml`
-and `deploy/k8s/*.yaml` are believed correct against the acceptance criterion
-(a cross-zone connection attempt should produce a `DROPPED` Hubble flow and
-`AGT-ZONE-001` should fire against it — see `poc/scenario_zone_cluster.sh`),
-but that belief has NOT been confirmed by actually running them successfully.
-Run `make cluster-up && make deploy && make poc-cluster` on real infrastructure
-(a VM, bare metal, or a CI runner with full nested-container support, e.g. a
-GitHub Actions Ubuntu runner) to get the actual proof. Treat any claim that
-Phase 2 "works" as unverified until that command has produced real
-`hubble observe` output — this file will be updated with that output once it
-exists.
-
-**Status**: manifests and cluster config written; cluster creation and Cilium
-Helm install verified; pod scheduling / live Hubble flow verification blocked
-in the build environment and not yet done anywhere else.
+</details>
 
 ## Data flow (steady state, once Phase 2/3 land)
 

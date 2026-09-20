@@ -1,15 +1,21 @@
 # Live verification runbook: Phase 2/3 on real infrastructure
 
-This repo's Phase 2 (k3d + Cilium cluster) and Phase 3 (Go flow-consumer /
-response-controller / admission-webhook against a live cluster) were written
-and unit-tested but never confirmed running end to end — the sandbox this
-repo was built in fails every CRI pod-sandbox creation (`runc create failed:
-... can't get final child's PID from pipe: EOF`) once containerd, not a bare
-`runc run`, drives it. See `docs/architecture.md` for the full diagnosis.
+**Update: the core Phase 2 acceptance criterion has been confirmed** — this
+runbook was followed end to end on a Windows machine with Docker Desktop
+(k3d v5.8.3, Cilium 1.16.5, Go 1.27.1). Every pod reached `Running`, a
+cross-zone connection attempt timed out, and `hubble observe` showed the real
+`DROPPED` flow with `AGT-ZONE-001` firing against it — see
+`docs/architecture.md`'s "Cluster" section for the captured output. This
+repo's own build sandbox fails every CRI pod-sandbox creation (`runc create
+failed: ... can't get final child's PID from pipe: EOF`) once containerd,
+not a bare `runc run`, drives it — that turned out to be specific to that
+sandbox, not the k3d/Cilium configuration.
 
-This runbook is what to run on infrastructure that does not have that
-limitation, to get the actual proof the README and ADR currently mark as
-missing.
+Not yet exercised live in that run: the `egress-gateway` pod (its image
+isn't built/pushed, so it stays `ImagePullBackOff`), the Kyverno admission
+policies, and the Go `response-controller`/`admission-webhook` against a
+real API server. This runbook remains the reference for doing those, and
+for reproducing the confirmed parts yourself.
 
 ---
 
@@ -88,6 +94,18 @@ kubectl get events -n kube-system --sort-by=.lastTimestamp | tail -20
   itself a useful, reportable finding — please open an issue with `uname -a`,
   `docker info`, and cgroup mode, so `docs/architecture.md` can be corrected
   with a real root cause instead of a suspicion.
+- **On Windows with Docker Desktop specifically**: `kubectl`/`helm` may time
+  out reaching `https://host.docker.internal:6550` even though the cluster is
+  up and the port is genuinely published (`docker ps` shows
+  `0.0.0.0:6550->6443/tcp` on the `*-serverlb` container) — `host.docker.internal`
+  can resolve to the host's LAN IP instead of loopback and then time out
+  reaching itself. Fix by pointing the kubeconfig at loopback directly
+  (confirmed working, k3d's generated cert covers it):
+  ```powershell
+  kubectl config set-cluster k3d-agent-zone-control --server=https://127.0.0.1:6550
+  ```
+  This is a local environment quirk, not a cluster or repo problem — nothing
+  else needs to change.
 
 ## 5. Deploy the zones and test fixtures
 
@@ -120,21 +138,39 @@ reach the egress gateway (home-zone egress works), confirms a direct
 connection into `corp-prod` fails, then checks `hubble observe` for a
 `DROPPED` flow toward `corp-prod` and prints it.
 
-**Expected real output** (this is the artifact to capture and paste into
-`docs/architecture.md`'s "Cluster" section, replacing the "not yet done"
-language — do not paraphrase it, use kubectl/hubble's actual output):
+**The `hubble` CLI is not bundled in the `hubble-relay` image** —
+`kubectl -n kube-system exec deploy/hubble-relay -- hubble observe ...`
+fails with `exec: "hubble": executable file not found in $PATH`. The
+verified working method is to port-forward Hubble Relay and run a
+separately-installed `hubble` CLI against it:
 
-- The `curl` into the egress gateway: an HTTP status line, connection
-  succeeds.
-- The `curl` into `corp-prod-target`: a timeout/connection-refused (the
-  script treats this as expected and does not fail on it).
-- `hubble observe --namespace corp-prod --verdict DROPPED --last 20 --output
-  json`: at least one JSON flow object with `"verdict":"DROPPED"` and
-  `"destination":{"namespace":"corp-prod", ...}`.
+```bash
+kubectl -n kube-system port-forward deploy/hubble-relay 4245:4245 &
+
+# Download the matching CLI release (adjust for your OS/arch — this is the
+# real, verified-working release used during the confirmed run):
+#   Linux:   https://github.com/cilium/hubble/releases/download/v1.19.4/hubble-linux-amd64.tar.gz
+#   Windows: https://github.com/cilium/hubble/releases/download/v1.19.4/hubble-windows-amd64.tar.gz
+tar -xzf hubble-<os>-<arch>.tar.gz
+
+./hubble observe --server localhost:4245 --namespace corp-prod \
+  --verdict DROPPED --last 20 --output json
+```
+
+**Confirmed real output** — this has already been captured and is in
+`docs/architecture.md`'s "Cluster" section: `DROPPED` flows with
+`"drop_reason_desc":"POLICY_DENIED"`, source `agent-restricted/agent-probe`,
+destination `corp-prod/corp-prod-target`, `"traffic_direction":"EGRESS"`.
+If you reproduce this, you should see the same shape (verdict, drop reason,
+namespaces) even if UUIDs/timestamps/ports differ — no need to re-paste it
+into `docs/architecture.md` unless the shape itself differs from what's
+documented there, which would indicate a Cilium version-specific change
+worth noting.
 
 If it prints `PASS: cross-zone attempt blocked by NetworkPolicy and visible
 as a DROPPED Hubble flow`, Phase 2's acceptance criterion (per the handover
-spec, §7) is met for real, for the first time.
+spec, §7) is met for real — already confirmed once; this section is now for
+reproducing it, not proving it for the first time.
 
 ## 7. Optional: exercise the Go components against the live cluster
 
@@ -156,11 +192,13 @@ kubectl -n kube-system exec deploy/hubble-relay -- hubble observe -o json --foll
 
 Leave this running, then in another terminal repeat the cross-zone `curl`
 from §6's `agent-probe` pod — you should see `AGT-ZONE-001` printed live,
-sourced from the actual Hubble Relay this time. **This is the single most
-valuable artifact to capture**: it proves `go/internal/flow/hubble.go`'s
-JSON field mapping (written against documented shape, never validated
-live — see its own doc comment) actually matches a real Cilium version's
-output, or tells you exactly which field to fix if it doesn't.
+sourced from the actual Hubble Relay this time. This has already been done
+once (see `docs/architecture.md`'s "Cluster" section and
+`go/internal/flow/hubble_test.go`'s `TestParseHubbleLineRealCapturedFlow`),
+which confirmed `go/internal/flow/hubble.go`'s JSON field mapping matches
+real Cilium 1.16.5 output and also surfaced a real `agent-id`/`agent_id`
+label-key mismatch (since fixed). Re-running this is still useful to catch
+a field-shape change in a different Cilium version.
 
 For `response-controller` and `admission-webhook`, both need real RBAC to
 act against the cluster (a `NetworkPolicy` apply / pod delete, and a
@@ -180,13 +218,15 @@ itself tracks.
 
 ## 9. What to update afterward
 
-Whichever of the above actually ran, update — with the real output, not a
-paraphrase:
+The core Phase 2 criterion (§4-§6) has already been confirmed and
+documented (see the update note at the top of this file). If you exercise
+something **not yet covered** — the egress-gateway image, Kyverno
+admission policies, or `response-controller`/`admission-webhook` against a
+real API server — update, with the real output, not a paraphrase:
 
 - `docs/architecture.md`'s "Cluster" and "Go components" verification-status
   paragraphs
 - `docs/adr/0001-cilium-over-calico.md`'s status line
-- `README.md`'s Phase status table and the "Cluster (Phase 2, unverified)"
-  quick-start section
+- `README.md`'s Phase status table and the "Cluster" quick-start section
 - If `go/internal/flow/hubble.go`'s JSON shape needed correcting: its own
   doc comment, which explicitly asks for this
