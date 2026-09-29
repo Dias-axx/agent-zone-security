@@ -13,13 +13,12 @@ import (
 // node metadata; this struct covers only the fields the zone-crossing detection
 // rule (AGT-ZONE-001, detection/rules/zone-cross.yaml) needs.
 //
-// This shape was written against Hubble's documented JSON flow format and has
-// NOT been validated against a live Hubble process's actual output in this
-// repository's build environment (see docs/architecture.md's "Cluster" section
-// for why) — the exact field names/nesting can differ across Cilium versions.
-// Treat ParseHubbleLine as a best-effort mapping to be confirmed and adjusted
-// against a real `hubble observe -o json` sample the first time this runs
-// against a live cluster.
+// This shape was validated against a real `hubble observe -o json` DROPPED
+// flow from a live k3d + Cilium cluster (Cilium 1.16.5) — see
+// docs/architecture.md's "Cluster" section for the captured output. It
+// parsed correctly with no changes needed; the only issue that run surfaced
+// was agentIDFromLabels expecting a differently-formatted label key (fixed
+// below).
 type hubbleEnvelope struct {
 	Flow *hubbleFlow `json:"flow"`
 }
@@ -36,16 +35,23 @@ type hubbleEndpoint struct {
 	Labels    []string `json:"labels"`
 }
 
-const agentIDLabelKey = "agent_id="
+// agentIDLabelKey uses a hyphen, not an underscore, to match the label key
+// deploy/k8s/40-test-pods.yaml actually sets (agent-id: ...) and the one
+// go/internal/response/controller.go's isolate()/terminate() already select
+// pods by. An earlier version of this constant used "agent_id=" and never
+// matched anything on a real pod, silently attributing every real flow to
+// "unknown" — found by running this against a live cluster and cross-checking
+// against the label the response controller actually uses.
+const agentIDLabelKey = "agent-id="
 
-// agentIDFromLabels looks for an "agent_id=<value>" label, matching how Cilium
+// agentIDFromLabels looks for an "agent-id=<value>" label, matching how Cilium
 // surfaces Kubernetes pod labels as strings in a flow's endpoint — typically
-// prefixed with their source, e.g. "k8s:agent_id=agt-log-reader-001". The key
+// prefixed with their source, e.g. "k8s:agent-id=agt-log-reader-001". The key
 // must match exactly (after stripping an optional "<source>:" prefix), not
-// merely appear as a substring: a label such as "k8s:parent_agent_id=x" also
-// contains "agent_id=" as a substring, and matching on that would misattribute
+// merely appear as a substring: a label such as "k8s:parent-agent-id=x" also
+// contains "agent-id=" as a substring, and matching on that would misattribute
 // the flow to whatever value follows a differently-keyed label instead of the
-// real agent_id one (or none at all).
+// real agent-id one (or none at all).
 func agentIDFromLabels(labels []string) string {
 	for _, label := range labels {
 		key := label

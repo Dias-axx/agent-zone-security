@@ -1,10 +1,35 @@
 # ADR 0002: mitmproxy as the TLS-terminating egress gateway
 
-**Status**: Accepted. `evaluate_request()`'s decision logic is unit-tested
-directly, and the built image (`deploy/mitmproxy/Dockerfile`) was built and
-actually run as a standalone container in this repo's build session — real
-proxied HTTP requests through it produced the real decisions below (this is
-genuine command output, not a paraphrase):
+**Status**: Accepted, confirmed live in-cluster. Beyond the standalone-container
+run below, the gateway has since been deployed into the real k3d/Cilium
+cluster from Phase 2 (Docker Desktop, Windows) via `k3d image import` (no
+registry needed — see `deploy/k8s/30-egress-gateway.yaml` and
+`make egress-gateway-image-import`), reachable only from `agent-restricted`
+by `NetworkPolicy` as designed. A real proxied request from the actual
+`agent-probe` pod through the in-cluster gateway produced:
+
+```
+{"agent_id": "agt-log-reader-001", "destination": "internal-logs.example.com", "verdict": "allow", "rule_id": "AGT-EGRESS-OK", "reason": "egress target 'internal-logs.example.com' matches suffix entry '.internal-logs.example.com'"}
+{"agent_id": "agt-log-reader-001", "destination": "evil.example.com", "verdict": "deny", "rule_id": "AGT-EGRESS-001", "reason": "egress target 'evil.example.com' not in allowlist"}
+{"agent_id": "unknown", "destination": "internal-logs.example.com", "verdict": "deny", "rule_id": "AGT-EGRESS-001", "reason": "unknown or missing X-Agent-Id"}
+```
+
+matching the standalone run's decisions exactly, this time through the real
+`NetworkPolicy`-restricted path rather than a bare container. The allowed
+request still fails on DNS resolution afterward (`internal-logs.example.com`
+doesn't resolve anywhere real) — expected, and orthogonal to the policy
+decision itself. **What remains unverified**: CA trust distribution to real
+agent pods is still manual (see Consequences) — this run tested the proxy's
+allow/deny decision, not TLS interception of an HTTPS request end to end.
+
+<details>
+<summary>Original standalone-container verification (superseded by the in-cluster run above, kept for history)</summary>
+
+`evaluate_request()`'s decision logic is unit-tested directly, and the built
+image (`deploy/mitmproxy/Dockerfile`) was built and actually run as a
+standalone container in this repo's build session — real proxied HTTP
+requests through it produced the real decisions below (this is genuine
+command output, not a paraphrase):
 
 ```
 {"agent_id": "agt-log-reader-001", "destination": "internal-logs.example.com", "verdict": "allow", "rule_id": "AGT-EGRESS-OK", "reason": "egress target 'internal-logs.example.com' matches suffix entry '.internal-logs.example.com'"}
@@ -14,17 +39,15 @@ genuine command output, not a paraphrase):
    << Connection killed.
 ```
 
-The allowed request then failed on DNS resolution (`internal-logs.example.com`
-doesn't resolve to anything in this sandbox) — expected, and orthogonal to the
-policy decision, which is what this proves. **What is still unverified**: this
-ran as a standalone container, not deployed into the k3d/Cilium cluster from
-Phase 2 (still blocked there — see `docs/architecture.md`), so the
-NetworkPolicy-restricted-reachability part of the design and CA trust
-distribution to real agent pods remain unconfirmed. One real bug was found and
-fixed during this: the mitmproxy base image does not bundle PyYAML, so
+At that point this ran as a standalone container, not deployed into the
+k3d/Cilium cluster — the NetworkPolicy-restricted-reachability part of the
+design was unconfirmed. One real bug was found and fixed during this: the
+mitmproxy base image does not bundle PyYAML, so
 `deploy/mitmproxy/Dockerfile` installs it explicitly — building the image is
 what caught this, which is the whole point of actually running it instead of
 only reading the code.
+
+</details>
 
 ## Context
 

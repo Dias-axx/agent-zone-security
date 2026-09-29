@@ -1,11 +1,14 @@
 # ADR 0001: Cilium over Calico for the Phase 2 cluster CNI
 
-**Status**: Accepted, partially validated. `deploy/k3d/cluster.yaml` and the
-Cilium Helm install in `make cluster-up` implement this decision; cluster
-creation and the Cilium control-plane images installing were verified in this
-repo's build session, but pod scheduling (and therefore Hubble flow
-visibility) was not — see docs/architecture.md's "Cluster" section for the
-specific failure and what still needs confirming on real infrastructure.
+**Status**: Accepted, confirmed live. `deploy/k3d/cluster.yaml` and the
+Cilium Helm install in `make cluster-up` implement this decision. Cluster
+creation, every Cilium control-plane component reaching `Running`, and
+Hubble flow visibility for a real cross-zone `DROPPED` verdict were all
+confirmed on real infrastructure (Docker Desktop on Windows) — see
+docs/architecture.md's "Cluster" section for the captured output. This
+repo's own build sandbox hit a containerd/runc limitation that blocked pod
+scheduling entirely; that turned out to be specific to that sandbox, not a
+flaw in this decision or its implementation.
 
 ## Context
 
@@ -45,8 +48,9 @@ Use Cilium, with Hubble enabled for flow observability.
 
 - `deploy/k3d/cluster.yaml` disables the default k3d CNI (flannel) and the
   built-in NetworkPolicy controller before installing Cilium — implemented.
-- Detection rule `AGT-ZONE-001` is expected to fire against real Hubble
-  `DROPPED` flows once a cluster's pods actually schedule (see
-  `docs/architecture.md`), not only against the policy engine's own synthetic
-  verdicts as it does today. `poc/scenario_zone_cluster.sh` is written for
-  this but not yet confirmed passing anywhere.
+- Detection rule `AGT-ZONE-001` fires against real Hubble `DROPPED` flows —
+  confirmed by piping an actual captured flow through `go/cmd/flow-consumer`
+  and `detection/consume_stream.py` (see `docs/architecture.md`), not only
+  against the policy engine's own synthetic verdicts. This run also
+  surfaced and fixed a real `agent-id`/`agent_id` label-key mismatch between
+  `go/internal/flow/hubble.go` and `go/internal/response/controller.go`.

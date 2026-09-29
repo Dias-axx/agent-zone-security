@@ -11,6 +11,11 @@ metadata:
   labels:
     app: agent-probe
     role: read-only-agent
+    # Matches registry/agents.yaml's agt-log-reader-001 so go/internal/flow's
+    # agentIDFromLabels can attribute real Hubble flows to a real registry
+    # entry instead of falling back to "unknown" (found by actually running
+    # this against a live cluster — see docs/architecture.md).
+    agent-id: agt-log-reader-001
 spec:
   securityContext:
     runAsNonRoot: true
